@@ -1,0 +1,43 @@
+{
+  "name": "procureflow",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ProcureFlow — a premium procurement workspace for modern teams.",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.12.0",
+    "npm": ">=10.0.0"
+  },
+  "packageManager": "npm@11.13.0",
+  "scripts": {
+    "predev": "npm run build -w @procureflow/shared",
+    "dev": "concurrently -n api,web -c \"#A99B8D,#E6E0D8\" \"npm run dev -w @procureflow/server\" \"npm run dev -w @procureflow/web\"",
+    "prebuild": "npm run build -w @procureflow/shared",
+    "build": "npm run build -w @procureflow/server && npm run build -w @procureflow/web",
+    "pretest": "npm run build -w @procureflow/shared",
+    "test": "npm run test -w @procureflow/server && npm run test -w @procureflow/web",
+    "pretypecheck": "npm run build -w @procureflow/shared",
+    "typecheck": "npm run typecheck -w @procureflow/server && npm run typecheck -w @procureflow/web",
+    "lint": "eslint . --max-warnings=0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "start": "npm run start -w @procureflow/server"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "concurrently": "^10.0.6",
+    "eslint": "^10.14.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.14.0",
+    "prettier": "^3.9.10",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.1",
+    "vite": "^7.3.7",
+    "vitest": "^4.1.12"
+  }
+}
