@@ -23,7 +23,7 @@ export default function ModulePage({ moduleKey }: ModulePageProps) {
         actions={
           <span className="inline-flex items-center gap-2 rounded-full border border-beige bg-white px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-stone">
             <span className="h-1.5 w-1.5 rounded-full bg-ochre" aria-hidden="true" />
-            Phase 2 module
+            Workflow module
           </span>
         }
       />
@@ -56,8 +56,8 @@ export default function ModulePage({ moduleKey }: ModulePageProps) {
         />
 
         <div className="border-t border-beige/70 bg-ivory/50 px-5 py-3 text-center text-[9.5px] leading-5 text-taupe sm:px-6">
-          Phase 1 establishes the route, shared contracts and workspace navigation. The workflow is
-          scheduled for Phase 2.
+          Phase 2 establishes authentication and the database architecture. Procurement workflows
+          are scheduled for Phase 3.
         </div>
       </Card>
     </div>

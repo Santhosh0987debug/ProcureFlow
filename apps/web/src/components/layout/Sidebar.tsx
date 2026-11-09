@@ -1,6 +1,7 @@
-import { PanelLeftClose, X } from 'lucide-react';
+import { Building2, PanelLeftClose, X } from 'lucide-react';
 import { useEffect } from 'react';
 import { Link, NavLink } from 'react-router-dom';
+import { useAuth } from '../../auth/AuthContext';
 import { cn } from '../../lib/cn';
 import { navigationSections, settingsNavItem } from '../../data/navigation';
 import type { NavItem } from '../../data/navigation';
@@ -16,6 +17,8 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed, mobileOpen, onToggleCollapsed, onCloseMobile }: SidebarProps) {
   const { state: apiState, health } = useApiHealth();
+  const { session } = useAuth();
+  const workspace = session?.workspaces[0];
 
   useEffect(() => {
     if (!mobileOpen) {
@@ -168,6 +171,28 @@ export function Sidebar({ collapsed, mobileOpen, onToggleCollapsed, onCloseMobil
         </nav>
 
         <div className="shrink-0 border-t border-white/[0.06] p-3">
+          {workspace ? (
+            <div
+              title={`${workspace.name} · ${workspace.role}`}
+              className={cn(
+                'mb-1 flex items-center gap-2.5 rounded-xl border border-white/[0.05] bg-white/[0.025] px-3 py-2.5',
+                collapsed && 'lg:justify-center lg:px-0',
+              )}
+            >
+              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-ivory/[0.07] text-ivory/60">
+                <Building2 size={13} strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <span className={cn('min-w-0', collapsed && 'lg:hidden')}>
+                <span className="block truncate text-[10.5px] font-medium text-ivory/75">
+                  {workspace.name}
+                </span>
+                <span className="mt-0.5 block truncate text-[8.5px] capitalize tracking-[0.06em] text-ivory/30">
+                  {workspace.role} · {workspace.currency}
+                </span>
+              </span>
+            </div>
+          ) : null}
+
           <div
             title={`${apiStatus.label}${health ? ` · v${health.version}` : ''}`}
             className={cn(

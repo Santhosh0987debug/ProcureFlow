@@ -1,27 +1,19 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { afterEach, beforeEach, vi } from 'vitest';
+import { createFetchMock } from './api-mock';
 
-const healthResponse = {
-  status: 'ok',
-  service: 'procureflow-api',
-  version: '0.1.0',
-  environment: 'test',
-  uptimeSeconds: 12,
-  timestamp: new Date().toISOString(),
-};
+// Cold jsdom renders of the full dashboard can exceed the 1s default on CI.
+configure({ asyncUtilTimeout: 5_000 });
+
+// Warm the lazily loaded dashboard module once per test file. Without this the
+// first render races Testing Library's timeout against Vite's on-demand
+// transform in cold CI runs.
+await import('../pages/DashboardPage');
 
 beforeEach(() => {
   window.localStorage.clear();
-
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => healthResponse,
-    }),
-  );
+  vi.stubGlobal('fetch', createFetchMock());
 });
 
 afterEach(() => {

@@ -1,3 +1,4 @@
+import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express from 'express';
 import { env } from './config/env.js';
@@ -10,6 +11,11 @@ export function createApp() {
   const app = express();
 
   app.disable('x-powered-by');
+
+  if (env.trustProxy > 0) {
+    app.set('trust proxy', env.trustProxy);
+  }
+
   app.use(
     cors({
       origin(origin, callback) {
@@ -25,10 +31,14 @@ export function createApp() {
           }),
         );
       },
-      credentials: false,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Accept'],
+      maxAge: 86_400,
     }),
   );
   app.use(express.json({ limit: '1mb' }));
+  app.use(cookieParser());
 
   app.use(env.apiPrefix, apiRouter);
 

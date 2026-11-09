@@ -1,4 +1,5 @@
 import { BadgeCheck, BarChart3, ClipboardList, Plus, ShoppingBag, Wallet } from 'lucide-react';
+import { useAuth } from '../auth/AuthContext';
 import {
   activity,
   dashboardKpis,
@@ -64,6 +65,9 @@ const kpiMetrics: KpiMetric[] = [
 ];
 
 export default function DashboardPage() {
+  const { session } = useAuth();
+  const workspaceName = session?.workspaces[0]?.name ?? 'Demo workspace';
+
   return (
     <div className="space-y-6 lg:space-y-7">
       <PageHeader
@@ -109,8 +113,8 @@ export default function DashboardPage() {
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[9.5px] text-taupe">
-        <span>Demo workspace · Amounts shown in USD</span>
-        <span>ProcureFlow Phase 1 · Last updated just now</span>
+        <span>{workspaceName} · Amounts shown in USD</span>
+        <span>ProcureFlow Phase 2 · Authenticated workspace</span>
       </div>
     </div>
   );

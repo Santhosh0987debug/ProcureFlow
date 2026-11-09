@@ -36,7 +36,7 @@ describe('ProcureFlow workspace', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Vendors' }));
 
     expect(await screen.findByRole('heading', { name: 'Vendors', level: 1 })).toBeInTheDocument();
-    expect(screen.getByText('Phase 2 module')).toBeInTheDocument();
+    expect(screen.getByText('Workflow module')).toBeInTheDocument();
   });
 
   it('filters the workspace navigation with search', async () => {
