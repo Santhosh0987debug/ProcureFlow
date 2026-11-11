@@ -12,7 +12,7 @@ const profileLinks = [
 ];
 
 export function ProfileMenu() {
-  const { session, logout } = useAuth();
+  const { session, activeWorkspace, logout } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -21,7 +21,7 @@ export function ProfileMenu() {
   useDismissable(open, () => setOpen(false), containerRef);
 
   const user = session?.user;
-  const workspace = session?.workspaces[0];
+  const workspace = activeWorkspace;
 
   if (!user) {
     return null;
@@ -126,7 +126,7 @@ export function ProfileMenu() {
             <span className="truncate text-[9px] uppercase tracking-[0.1em] text-taupe">
               {workspace?.name ?? 'Workspace'}
             </span>
-            <span className="shrink-0 text-[9px] text-taupe">v0.2.0 · Phase 2</span>
+            <span className="shrink-0 text-[9px] text-taupe">v0.3.0 · Phase 3</span>
           </div>
         </div>
       ) : null}

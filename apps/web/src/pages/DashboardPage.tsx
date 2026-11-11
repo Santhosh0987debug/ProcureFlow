@@ -1,5 +1,7 @@
+import { Permission, ROLE_LABELS } from '@procureflow/shared';
 import { BadgeCheck, BarChart3, ClipboardList, Plus, ShoppingBag, Wallet } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
+import { cn } from '../lib/cn';
 import {
   activity,
   dashboardKpis,
@@ -18,7 +20,11 @@ import { SpendingChart } from '../components/dashboard/SpendingChart';
 import { ButtonLink } from '../components/ui/ButtonLink';
 import { PageHeader } from '../components/ui/PageHeader';
 
-const kpiMetrics: KpiMetric[] = [
+interface DashboardMetric extends KpiMetric {
+  permissions: readonly Permission[];
+}
+
+const kpiMetrics: DashboardMetric[] = [
   {
     id: 'total-spend',
     label: 'Total spend',
@@ -30,6 +36,7 @@ const kpiMetrics: KpiMetric[] = [
     trend: '+8.2%',
     icon: Wallet,
     href: '/reports',
+    permissions: [Permission.ReportsRead],
   },
   {
     id: 'active-requests',
@@ -39,6 +46,7 @@ const kpiMetrics: KpiMetric[] = [
     trend: '+12 this month',
     icon: ClipboardList,
     href: '/purchase-requests',
+    permissions: [Permission.RequestsRead, Permission.RequestsReadOwn],
   },
   {
     id: 'pending-approvals',
@@ -49,6 +57,7 @@ const kpiMetrics: KpiMetric[] = [
     trendTone: 'attention',
     icon: BadgeCheck,
     href: '/approvals',
+    permissions: [Permission.ApprovalsRead],
   },
   {
     id: 'active-orders',
@@ -61,12 +70,19 @@ const kpiMetrics: KpiMetric[] = [
     trend: '+6 this month',
     icon: ShoppingBag,
     href: '/purchase-orders',
+    permissions: [Permission.PurchaseOrdersRead],
   },
 ];
 
 export default function DashboardPage() {
-  const { session } = useAuth();
-  const workspaceName = session?.workspaces[0]?.name ?? 'Demo workspace';
+  const { activeWorkspace, hasPermission, hasAnyPermission } = useAuth();
+  const workspaceName = activeWorkspace?.name ?? 'Demo workspace';
+  const canViewReports = hasPermission(Permission.ReportsRead);
+  const canCreateRequest = hasPermission(Permission.RequestsCreate);
+  const canViewApprovals = hasPermission(Permission.ApprovalsRead);
+  const canViewPurchaseOrders = hasPermission(Permission.PurchaseOrdersRead);
+  const visibleMetrics = kpiMetrics.filter((metric) => hasAnyPermission(metric.permissions));
+  const hasActions = canViewReports || canCreateRequest;
 
   return (
     <div className="space-y-6 lg:space-y-7">
@@ -75,14 +91,20 @@ export default function DashboardPage() {
         title="Procurement overview"
         description="A considered view of spend, approvals and delivery across your supply base."
         actions={
-          <>
-            <ButtonLink to="/reports" variant="secondary" icon={BarChart3}>
-              View reports
-            </ButtonLink>
-            <ButtonLink to="/purchase-requests" variant="primary" icon={Plus}>
-              New request
-            </ButtonLink>
-          </>
+          hasActions ? (
+            <>
+              {canViewReports ? (
+                <ButtonLink to="/reports" variant="secondary" icon={BarChart3}>
+                  View reports
+                </ButtonLink>
+              ) : null}
+              {canCreateRequest ? (
+                <ButtonLink to="/purchase-requests" variant="primary" icon={Plus}>
+                  New request
+                </ButtonLink>
+              ) : null}
+            </>
+          ) : undefined
         }
       />
 
@@ -90,7 +112,7 @@ export default function DashboardPage() {
         aria-label="Key procurement metrics"
         className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 xl:gap-5"
       >
-        {kpiMetrics.map((metric) => (
+        {visibleMetrics.map((metric) => (
           <KpiCard key={metric.id} metric={metric} />
         ))}
       </section>
@@ -100,21 +122,35 @@ export default function DashboardPage() {
         <ActivityTimeline events={activity} />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2 xl:gap-5">
-        <ApprovalsTable
-          approvals={pendingApprovals}
-          total={dashboardKpis.pendingApprovals}
-          dueToday={dashboardSupporting.approvalsDueToday}
-        />
-        <PurchaseOrdersTable
-          orders={recentPurchaseOrders}
-          total={dashboardKpis.activePurchaseOrders}
-        />
-      </div>
+      {canViewApprovals || canViewPurchaseOrders ? (
+        <div
+          className={cn(
+            'grid gap-4 xl:gap-5',
+            canViewApprovals && canViewPurchaseOrders && 'xl:grid-cols-2',
+          )}
+        >
+          {canViewApprovals ? (
+            <ApprovalsTable
+              approvals={pendingApprovals}
+              total={dashboardKpis.pendingApprovals}
+              dueToday={dashboardSupporting.approvalsDueToday}
+            />
+          ) : null}
+          {canViewPurchaseOrders ? (
+            <PurchaseOrdersTable
+              orders={recentPurchaseOrders}
+              total={dashboardKpis.activePurchaseOrders}
+            />
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[9.5px] text-taupe">
         <span>{workspaceName} · Amounts shown in USD</span>
-        <span>ProcureFlow Phase 2 · Authenticated workspace</span>
+        <span>
+          {activeWorkspace ? ROLE_LABELS[activeWorkspace.role] : 'Workspace member'} · ProcureFlow
+          Phase 3
+        </span>
       </div>
     </div>
   );

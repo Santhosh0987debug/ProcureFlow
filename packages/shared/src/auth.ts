@@ -1,11 +1,17 @@
 import type { ApiSuccessResponse } from './api.js';
+import type { Permission } from './permissions.js';
 import type { Currency } from './procurement.js';
 
+/**
+ * Workspace roles are persisted in lower-case form for stable database values.
+ * A member's role always comes from their WorkspaceMember record.
+ */
 export enum WorkspaceRole {
   Owner = 'owner',
   Admin = 'admin',
+  ProcurementManager = 'procurement_manager',
+  Requester = 'requester',
   Approver = 'approver',
-  Buyer = 'buyer',
   Viewer = 'viewer',
 }
 
@@ -25,6 +31,8 @@ export interface AuthWorkspace {
   slug: string;
   role: WorkspaceRole;
   currency: Currency;
+  /** Effective permissions for this membership, resolved from the role registry. */
+  permissions: Permission[];
 }
 
 export interface AuthSession {

@@ -8,10 +8,19 @@ export type AuthenticatedUser = Prisma.UserGetPayload<{
   };
 }>;
 
+export type AuthenticatedMembership = AuthenticatedUser['memberships'][number];
+
+export interface WorkspaceAuthorizationContext {
+  id: string;
+  membership: AuthenticatedMembership;
+}
+
 declare module 'express-serve-static-core' {
   interface Request {
     auth?: {
       user: AuthenticatedUser;
     };
+    workspace?: WorkspaceAuthorizationContext;
+    validatedQuery?: unknown;
   }
 }

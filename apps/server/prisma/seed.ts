@@ -85,6 +85,12 @@ async function seedUsers(passwordHash: string) {
       lastName: 'Lindberg',
       jobTitle: 'Compliance Manager',
     },
+    {
+      email: 'nadia.hassan@northwind.example',
+      firstName: 'Nadia',
+      lastName: 'Hassan',
+      jobTitle: 'Operations Coordinator',
+    },
   ];
 
   const users = [];
@@ -115,6 +121,7 @@ async function seedUsers(passwordHash: string) {
     priya: byEmail.get('priya.nair@northwind.example')!,
     marcus: byEmail.get('marcus.chen@northwind.example')!,
     sofia: byEmail.get('sofia.lindberg@northwind.example')!,
+    nadia: byEmail.get('nadia.hassan@northwind.example')!,
   };
 }
 
@@ -143,8 +150,9 @@ async function main(): Promise<void> {
           { userId: people.amara.id, role: 'owner', joinedAt: daysAgo(420, 9) },
           { userId: people.daniel.id, role: 'admin', joinedAt: daysAgo(398, 9) },
           { userId: people.priya.id, role: 'approver', joinedAt: daysAgo(355, 9) },
-          { userId: people.marcus.id, role: 'buyer', joinedAt: daysAgo(301, 9) },
+          { userId: people.marcus.id, role: 'procurement_manager', joinedAt: daysAgo(301, 9) },
           { userId: people.sofia.id, role: 'viewer', joinedAt: daysAgo(188, 9) },
+          { userId: people.nadia.id, role: 'requester', joinedAt: daysAgo(120, 9) },
         ],
       },
     },

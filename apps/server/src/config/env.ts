@@ -105,9 +105,22 @@ if (cookieSameSite === 'none' && !cookieSecure) {
   throw new Error('COOKIE_SAME_SITE=none requires COOKIE_SECURE=true.');
 }
 
-const version = process.env.APP_VERSION?.trim() || '0.2.0';
+const version = process.env.APP_VERSION?.trim() || '0.3.0';
 const jwtSecret = requireString('JWT_SECRET', 32);
 const databaseUrl = requireString('DATABASE_URL');
+
+const invitationDelivery = (process.env.INVITATION_DELIVERY?.trim().toLowerCase() ??
+  (isProduction ? 'email' : 'link')) as 'link' | 'email';
+
+if (!['link', 'email'].includes(invitationDelivery)) {
+  throw new Error('Invalid INVITATION_DELIVERY. Expected one of: link, email.');
+}
+
+const webAppUrl = (optionalString('WEB_APP_URL') ?? 'http://localhost:5173').replace(/\/+$/, '');
+
+if (!/^https?:\/\//i.test(webAppUrl)) {
+  throw new Error('WEB_APP_URL must be an absolute http(s) URL.');
+}
 
 export const env = Object.freeze({
   nodeEnv,
@@ -128,6 +141,9 @@ export const env = Object.freeze({
   cookieDomain: optionalString('COOKIE_DOMAIN'),
   cookieSecure,
   cookieSameSite,
+  invitationTtlHours: readInteger('INVITATION_TTL_HOURS', 72, 1, 720),
+  invitationDelivery,
+  webAppUrl,
   bcryptRounds: readInteger('BCRYPT_ROUNDS', 12, 10, 15),
   authRateLimitWindowMinutes: readInteger('AUTH_RATE_LIMIT_WINDOW_MINUTES', 15, 1, 1440),
   authRateLimitMax: readInteger('AUTH_RATE_LIMIT_MAX', isTest ? 1000 : 20, 1, 100_000),

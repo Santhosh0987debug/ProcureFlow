@@ -85,14 +85,27 @@ enum QuotationStatus {
   expired
 }
 
-/// Workspace roles are persisted now so Phase 3 can enforce RBAC without a
-/// data migration. Phase 2 deliberately does not evaluate permissions.
+/// Workspace roles are always resolved from the member record, never from the
+/// global user. The lower-case values are the stable database representation.
 enum WorkspaceRole {
   owner
   admin
+  procurement_manager
+  requester
   approver
-  buyer
   viewer
+}
+
+enum MembershipStatus {
+  active
+  suspended
+}
+
+enum InvitationStatus {
+  pending
+  accepted
+  revoked
+  expired
 }
 
 model User {
@@ -108,28 +121,32 @@ model User {
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   memberships               WorkspaceMember[]
-  createdWorkspaces         Workspace[]         @relation("WorkspaceCreator")
-  requestedPurchaseRequests PurchaseRequest[]   @relation("PurchaseRequestRequester")
-  approvalSteps             ApprovalStep[]      @relation("ApprovalStepApprover")
-  createdPurchaseOrders     PurchaseOrder[]     @relation("PurchaseOrderCreator")
-  receivedDeliveries        Delivery[]          @relation("DeliveryReceiver")
-  auditLogs                 AuditLog[]          @relation("AuditActor")
+  suspendedMemberships      WorkspaceMember[]     @relation("MembershipSuspender")
+  createdWorkspaces         Workspace[]           @relation("WorkspaceCreator")
+  requestedPurchaseRequests PurchaseRequest[]     @relation("PurchaseRequestRequester")
+  approvalSteps             ApprovalStep[]        @relation("ApprovalStepApprover")
+  createdPurchaseOrders     PurchaseOrder[]       @relation("PurchaseOrderCreator")
+  receivedDeliveries        Delivery[]            @relation("DeliveryReceiver")
+  sentInvitations           WorkspaceInvitation[] @relation("InvitationSender")
+  acceptedInvitations       WorkspaceInvitation[] @relation("InvitationAcceptor")
+  auditLogs                 AuditLog[]            @relation("AuditActor")
 
   @@map("users")
 }
 
 model Workspace {
-  id          String    @id @default(uuid()) @db.Uuid
-  name        String    @db.VarChar(120)
-  slug        String    @unique @db.VarChar(140)
-  description String?   @db.Text
-  currency    Currency  @default(USD)
-  createdById String    @map("created_by_id") @db.Uuid
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(120)
+  slug        String   @unique @db.VarChar(140)
+  description String?  @db.Text
+  currency    Currency @default(USD)
+  createdById String   @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  createdBy        User              @relation("WorkspaceCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy        User                  @relation("WorkspaceCreator", fields: [createdById], references: [id], onDelete: Restrict)
   members          WorkspaceMember[]
+  invitations      WorkspaceInvitation[]
   vendors          Vendor[]
   purchaseRequests PurchaseRequest[]
   approvals        Approval[]
@@ -143,47 +160,83 @@ model Workspace {
 }
 
 model WorkspaceMember {
-  id          String        @id @default(uuid()) @db.Uuid
-  workspaceId String        @map("workspace_id") @db.Uuid
-  userId      String        @map("user_id") @db.Uuid
-  role        WorkspaceRole @default(viewer)
-  joinedAt    DateTime      @default(now()) @map("joined_at") @db.Timestamptz(3)
-  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id            String           @id @default(uuid()) @db.Uuid
+  workspaceId   String           @map("workspace_id") @db.Uuid
+  userId        String           @map("user_id") @db.Uuid
+  role          WorkspaceRole    @default(viewer)
+  status        MembershipStatus @default(active)
+  suspendedAt   DateTime?        @map("suspended_at") @db.Timestamptz(3)
+  suspendedById String?          @map("suspended_by_id") @db.Uuid
+  joinedAt      DateTime         @default(now()) @map("joined_at") @db.Timestamptz(3)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  suspendedBy User?     @relation("MembershipSuspender", fields: [suspendedById], references: [id], onDelete: SetNull)
 
   @@unique([workspaceId, userId])
   @@index([userId])
   @@index([workspaceId, role])
+  @@index([workspaceId, status, role])
   @@map("workspace_members")
 }
 
-model Vendor {
-  id            String              @id @default(uuid()) @db.Uuid
-  workspaceId   String              @map("workspace_id") @db.Uuid
-  name          String              @db.VarChar(160)
-  code          String              @db.VarChar(40)
-  category      ProcurementCategory
-  status        VendorStatus        @default(onboarding)
-  contactName   String?             @map("contact_name") @db.VarChar(120)
-  email         String?             @db.VarChar(254)
-  phone         String?             @db.VarChar(40)
-  website       String?             @db.VarChar(300)
-  addressLine1  String?             @map("address_line1") @db.VarChar(180)
-  addressLine2  String?             @map("address_line2") @db.VarChar(180)
-  city          String?             @db.VarChar(100)
-  region        String?             @db.VarChar(100)
-  postalCode    String?             @map("postal_code") @db.VarChar(30)
-  country       String?             @db.VarChar(100)
-  taxId         String?             @map("tax_id") @db.VarChar(60)
-  paymentTerms  String?             @map("payment_terms") @db.VarChar(120)
-  notes         String?             @db.Text
-  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt     DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+/// Invitation tokens are only ever stored as SHA-256 hashes. `activeKey` is a
+/// nullable unique value that prevents more than one pending invitation for the
+/// same workspace and email, while still allowing a new invitation after the
+/// previous one is accepted, revoked, or expired.
+model WorkspaceInvitation {
+  id           String           @id @default(uuid()) @db.Uuid
+  workspaceId  String           @map("workspace_id") @db.Uuid
+  email        String           @db.VarChar(254)
+  role         WorkspaceRole
+  tokenHash    String           @unique @map("token_hash") @db.VarChar(64)
+  status       InvitationStatus @default(pending)
+  activeKey    String?          @unique @map("active_key") @db.VarChar(320)
+  invitedById  String           @map("invited_by_id") @db.Uuid
+  acceptedById String?          @map("accepted_by_id") @db.Uuid
+  expiresAt    DateTime         @map("expires_at") @db.Timestamptz(3)
+  acceptedAt   DateTime?        @map("accepted_at") @db.Timestamptz(3)
+  revokedAt    DateTime?        @map("revoked_at") @db.Timestamptz(3)
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  workspace      Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy  User      @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Restrict)
+  acceptedBy User?     @relation("InvitationAcceptor", fields: [acceptedById], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status, createdAt])
+  @@index([email, status])
+  @@index([expiresAt])
+  @@index([invitedById])
+  @@map("workspace_invitations")
+}
+
+model Vendor {
+  id           String              @id @default(uuid()) @db.Uuid
+  workspaceId  String              @map("workspace_id") @db.Uuid
+  name         String              @db.VarChar(160)
+  code         String              @db.VarChar(40)
+  category     ProcurementCategory
+  status       VendorStatus        @default(onboarding)
+  contactName  String?             @map("contact_name") @db.VarChar(120)
+  email        String?             @db.VarChar(254)
+  phone        String?             @db.VarChar(40)
+  website      String?             @db.VarChar(300)
+  addressLine1 String?             @map("address_line1") @db.VarChar(180)
+  addressLine2 String?             @map("address_line2") @db.VarChar(180)
+  city         String?             @db.VarChar(100)
+  region       String?             @db.VarChar(100)
+  postalCode   String?             @map("postal_code") @db.VarChar(30)
+  country      String?             @db.VarChar(100)
+  taxId        String?             @map("tax_id") @db.VarChar(60)
+  paymentTerms String?             @map("payment_terms") @db.VarChar(120)
+  notes        String?             @db.Text
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   quotations     Quotation[]
   purchaseOrders PurchaseOrder[]
 
@@ -213,8 +266,8 @@ model PurchaseRequest {
   createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt     DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  workspace      Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  requestedBy    User                 @relation("PurchaseRequestRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  workspace      Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  requestedBy    User                  @relation("PurchaseRequestRequester", fields: [requestedById], references: [id], onDelete: Restrict)
   items          PurchaseRequestItem[]
   approval       Approval?
   quotations     Quotation[]
@@ -239,8 +292,8 @@ model PurchaseRequestItem {
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  purchaseRequest  PurchaseRequest  @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
-  quotationItems   QuotationItem[]
+  purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  quotationItems  QuotationItem[]
 
   @@index([purchaseRequestId])
   @@map("purchase_request_items")
@@ -329,7 +382,7 @@ model QuotationItem {
   createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  quotation          Quotation          @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  quotation           Quotation            @relation(fields: [quotationId], references: [id], onDelete: Cascade)
   purchaseRequestItem PurchaseRequestItem? @relation(fields: [purchaseRequestItemId], references: [id], onDelete: SetNull)
 
   @@unique([quotationId, purchaseRequestItemId])
@@ -339,30 +392,30 @@ model QuotationItem {
 }
 
 model PurchaseOrder {
-  id                    String              @id @default(uuid()) @db.Uuid
-  workspaceId           String              @map("workspace_id") @db.Uuid
-  poNumber              String              @map("po_number") @db.VarChar(40)
-  purchaseRequestId     String?             @map("purchase_request_id") @db.Uuid
-  vendorId              String              @map("vendor_id") @db.Uuid
-  quotationId           String?             @unique @map("quotation_id") @db.Uuid
-  status                PurchaseOrderStatus @default(draft)
-  currency              Currency            @default(USD)
-  subtotal              Decimal             @db.Decimal(14, 2)
-  taxAmount             Decimal             @default(0) @map("tax_amount") @db.Decimal(14, 2)
-  totalAmount           Decimal             @map("total_amount") @db.Decimal(14, 2)
-  issuedAt              DateTime?           @map("issued_at") @db.Timestamptz(3)
-  expectedDeliveryDate  DateTime?           @map("expected_delivery_date") @db.Timestamptz(3)
-  deliveredAt           DateTime?           @map("delivered_at") @db.Timestamptz(3)
-  notes                 String?             @db.Text
-  createdById           String              @map("created_by_id") @db.Uuid
-  createdAt             DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt             DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                   String              @id @default(uuid()) @db.Uuid
+  workspaceId          String              @map("workspace_id") @db.Uuid
+  poNumber             String              @map("po_number") @db.VarChar(40)
+  purchaseRequestId    String?             @map("purchase_request_id") @db.Uuid
+  vendorId             String              @map("vendor_id") @db.Uuid
+  quotationId          String?             @unique @map("quotation_id") @db.Uuid
+  status               PurchaseOrderStatus @default(draft)
+  currency             Currency            @default(USD)
+  subtotal             Decimal             @db.Decimal(14, 2)
+  taxAmount            Decimal             @default(0) @map("tax_amount") @db.Decimal(14, 2)
+  totalAmount          Decimal             @map("total_amount") @db.Decimal(14, 2)
+  issuedAt             DateTime?           @map("issued_at") @db.Timestamptz(3)
+  expectedDeliveryDate DateTime?           @map("expected_delivery_date") @db.Timestamptz(3)
+  deliveredAt          DateTime?           @map("delivered_at") @db.Timestamptz(3)
+  notes                String?             @db.Text
+  createdById          String              @map("created_by_id") @db.Uuid
+  createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  purchaseRequest PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id], onDelete: SetNull)
-  vendor          Vendor          @relation(fields: [vendorId], references: [id], onDelete: Restrict)
-  quotation       Quotation?      @relation("QuotationPurchaseOrder", fields: [quotationId], references: [id], onDelete: SetNull)
-  createdBy       User            @relation("PurchaseOrderCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  workspace       Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  purchaseRequest PurchaseRequest?    @relation(fields: [purchaseRequestId], references: [id], onDelete: SetNull)
+  vendor          Vendor              @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  quotation       Quotation?          @relation("QuotationPurchaseOrder", fields: [quotationId], references: [id], onDelete: SetNull)
+  createdBy       User                @relation("PurchaseOrderCreator", fields: [createdById], references: [id], onDelete: Restrict)
   items           PurchaseOrderItem[]
   deliveries      Delivery[]
 
@@ -393,19 +446,19 @@ model PurchaseOrderItem {
 }
 
 model Delivery {
-  id               String         @id @default(uuid()) @db.Uuid
-  workspaceId      String         @map("workspace_id") @db.Uuid
-  purchaseOrderId  String         @map("purchase_order_id") @db.Uuid
-  deliveryNumber   String         @map("delivery_number") @db.VarChar(40)
-  status           DeliveryStatus @default(scheduled)
-  carrier          String?        @db.VarChar(140)
-  trackingNumber   String?        @map("tracking_number") @db.VarChar(100)
-  scheduledAt      DateTime?      @map("scheduled_at") @db.Timestamptz(3)
-  deliveredAt      DateTime?      @map("delivered_at") @db.Timestamptz(3)
-  receivedById     String?        @map("received_by_id") @db.Uuid
-  notes            String?        @db.Text
-  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id              String         @id @default(uuid()) @db.Uuid
+  workspaceId     String         @map("workspace_id") @db.Uuid
+  purchaseOrderId String         @map("purchase_order_id") @db.Uuid
+  deliveryNumber  String         @map("delivery_number") @db.VarChar(40)
+  status          DeliveryStatus @default(scheduled)
+  carrier         String?        @db.VarChar(140)
+  trackingNumber  String?        @map("tracking_number") @db.VarChar(100)
+  scheduledAt     DateTime?      @map("scheduled_at") @db.Timestamptz(3)
+  deliveredAt     DateTime?      @map("delivered_at") @db.Timestamptz(3)
+  receivedById    String?        @map("received_by_id") @db.Uuid
+  notes           String?        @db.Text
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
@@ -421,17 +474,17 @@ model Delivery {
 /// Append-only by design: there is no updatedAt and no update path in the API.
 /// A Phase 3 write service will only insert rows.
 model AuditLog {
-  id         String   @id @default(uuid()) @db.Uuid
-  workspaceId String  @map("workspace_id") @db.Uuid
-  actorId    String?  @map("actor_id") @db.Uuid
-  action     String   @db.VarChar(100)
-  entityType String   @map("entity_type") @db.VarChar(60)
-  entityId   String?  @map("entity_id") @db.VarChar(64)
-  summary    String?  @db.VarChar(500)
-  metadata   Json?
-  ipAddress  String?  @map("ip_address") @db.VarChar(64)
-  userAgent  String?  @map("user_agent") @db.VarChar(500)
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  actorId     String?  @map("actor_id") @db.Uuid
+  action      String   @db.VarChar(100)
+  entityType  String   @map("entity_type") @db.VarChar(60)
+  entityId    String?  @map("entity_id") @db.VarChar(64)
+  summary     String?  @db.VarChar(500)
+  metadata    Json?
+  ipAddress   String?  @map("ip_address") @db.VarChar(64)
+  userAgent   String?  @map("user_agent") @db.VarChar(500)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   actor     User?     @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)

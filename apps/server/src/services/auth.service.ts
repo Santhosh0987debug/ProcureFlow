@@ -1,15 +1,16 @@
 import { randomBytes } from 'node:crypto';
 import { Prisma } from '@prisma/client';
-import { WorkspaceRole } from '@procureflow/shared';
+import { MembershipStatus, permissionsForRole } from '@procureflow/shared';
 import type { AuthSession, Currency, LoginRequest, RegisterRequest } from '@procureflow/shared';
 import { AppError } from '../errors/app-error.js';
 import { hashPassword, verifyPasswordWithTimingProtection } from '../lib/password.js';
 import { prisma } from '../lib/prisma.js';
+import { toWorkspaceRole } from '../lib/roles.js';
 import { signSessionToken } from '../lib/session-token.js';
 import { toSlug } from '../lib/slug.js';
 import type { AuthenticatedUser } from '../types/auth.js';
 
-const sessionInclude = {
+export const sessionInclude = {
   memberships: {
     include: { workspace: true },
     orderBy: { createdAt: 'asc' },
@@ -40,21 +41,6 @@ function isUniqueEmailError(error: unknown): boolean {
     : typeof target === 'string' && target.includes('email');
 }
 
-function toWorkspaceRole(role: string): WorkspaceRole {
-  switch (role) {
-    case 'owner':
-      return WorkspaceRole.Owner;
-    case 'admin':
-      return WorkspaceRole.Admin;
-    case 'approver':
-      return WorkspaceRole.Approver;
-    case 'buyer':
-      return WorkspaceRole.Buyer;
-    default:
-      return WorkspaceRole.Viewer;
-  }
-}
-
 function toCurrency(currency: string): Currency {
   return currency as Currency;
 }
@@ -70,13 +56,20 @@ export function toAuthSession(user: AuthenticatedUser): AuthSession {
       avatarUrl: user.avatarUrl,
       createdAt: user.createdAt.toISOString(),
     },
-    workspaces: user.memberships.map((membership) => ({
-      id: membership.workspace.id,
-      name: membership.workspace.name,
-      slug: membership.workspace.slug,
-      role: toWorkspaceRole(membership.role),
-      currency: toCurrency(membership.workspace.currency),
-    })),
+    workspaces: user.memberships
+      .filter((membership) => membership.status === MembershipStatus.Active)
+      .map((membership) => {
+        const role = toWorkspaceRole(membership.role);
+
+        return {
+          id: membership.workspace.id,
+          name: membership.workspace.name,
+          slug: membership.workspace.slug,
+          role,
+          currency: toCurrency(membership.workspace.currency),
+          permissions: [...permissionsForRole(role)],
+        };
+      }),
   };
 }
 

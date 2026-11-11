@@ -37,9 +37,9 @@ export const moduleDefinitions: Record<ModuleKey, ModuleDefinition> = {
     eyebrow: 'Procurement',
     description:
       'A considered intake experience for purchase intent, with clear ownership from submission to sourcing.',
-    emptyTitle: 'Request intake is ready for Phase 2',
+    emptyTitle: 'Request intake is ready for the next phase',
     emptyDescription:
-      'The workspace route and shared request contracts are in place. Intake forms, line items and approval routing arrive in the next phase.',
+      'The workspace route and shared request contracts are in place. Intake forms, line items and approval routing arrive in a later phase.',
     icon: FileText,
   },
   approvals: {
@@ -49,7 +49,7 @@ export const moduleDefinitions: Record<ModuleKey, ModuleDefinition> = {
       'Keep decisions moving with a focused review queue for requests that need attention.',
     emptyTitle: 'The approval queue is being prepared',
     emptyDescription:
-      'Approval records and status vocabulary are defined. The review workflow, thresholds and delegation controls arrive in Phase 2.',
+      'Approval records and status vocabulary are defined. The review workflow, thresholds and delegation controls arrive in a later phase.',
     icon: BadgeCheck,
   },
   vendors: {
@@ -68,7 +68,7 @@ export const moduleDefinitions: Record<ModuleKey, ModuleDefinition> = {
     description: 'Compare supplier responses with structure and clarity before committing spend.',
     emptyTitle: 'Quotation comparison is coming next',
     emptyDescription:
-      'The shared quotation contract is in place. Bid collection, comparison and award decisions are planned for Phase 2.',
+      'The shared quotation contract is in place. Bid collection, comparison and award decisions are planned for a later phase.',
     icon: FileSpreadsheet,
   },
   purchaseOrders: {
@@ -78,7 +78,7 @@ export const moduleDefinitions: Record<ModuleKey, ModuleDefinition> = {
       'Track commitments from issue through acknowledgement and delivery in one calm workspace.',
     emptyTitle: 'Purchase order operations are next',
     emptyDescription:
-      'Order statuses and summary contracts are ready. Issuing, amendments and supplier acknowledgement arrive in Phase 2.',
+      'Order statuses and summary contracts are ready. Issuing, amendments and supplier acknowledgement arrive in a later phase.',
     icon: ShoppingCart,
   },
   deliveries: {
@@ -88,7 +88,7 @@ export const moduleDefinitions: Record<ModuleKey, ModuleDefinition> = {
       'Follow inbound goods and services so teams know what has arrived and what is still expected.',
     emptyTitle: 'Delivery tracking is being prepared',
     emptyDescription:
-      'Delivery records and status vocabulary are defined. Receiving, exceptions and proof-of-delivery arrive in Phase 2.',
+      'Delivery records and status vocabulary are defined. Receiving, exceptions and proof-of-delivery arrive in a later phase.',
     icon: Truck,
   },
   reports: {
@@ -98,7 +98,7 @@ export const moduleDefinitions: Record<ModuleKey, ModuleDefinition> = {
       'Understand spend, cycle time and supplier performance with reporting built for decisions.',
     emptyTitle: 'Deeper reporting arrives next',
     emptyDescription:
-      'The dashboard establishes the spend analytics foundation. Exportable reports and category breakdowns are planned for Phase 2.',
+      'The dashboard establishes the spend analytics foundation. Exportable reports and category breakdowns are planned for a later phase.',
     icon: ChartNoAxesColumn,
   },
   auditLogs: {
@@ -106,9 +106,9 @@ export const moduleDefinitions: Record<ModuleKey, ModuleDefinition> = {
     eyebrow: 'Governance',
     description:
       'A durable, legible record of the decisions and changes that shape your procurement operation.',
-    emptyTitle: 'The audit trail is ready to grow',
+    emptyTitle: 'The audit trail is growing',
     emptyDescription:
-      'Audit entry contracts and workspace navigation are in place. Event capture and filtering arrive with the Phase 2 workflows.',
+      'Membership and invitation changes are now recorded in the append-only audit trail. The filterable audit-log viewer arrives in a later phase.',
     icon: History,
   },
   settings: {

@@ -56,8 +56,8 @@ export default function ModulePage({ moduleKey }: ModulePageProps) {
         />
 
         <div className="border-t border-beige/70 bg-ivory/50 px-5 py-3 text-center text-[9.5px] leading-5 text-taupe sm:px-6">
-          Phase 2 establishes authentication and the database architecture. Procurement workflows
-          are scheduled for Phase 3.
+          Phase 3 establishes workspace-scoped roles, permissions, and member administration.
+          Procurement workflows are scheduled for a later phase.
         </div>
       </Card>
     </div>

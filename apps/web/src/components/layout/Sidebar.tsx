@@ -1,9 +1,10 @@
+import { ROLE_LABELS } from '@procureflow/shared';
 import { Building2, PanelLeftClose, X } from 'lucide-react';
 import { useEffect } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { cn } from '../../lib/cn';
-import { navigationSections, settingsNavItem } from '../../data/navigation';
+import { canAccessNavItem, filterNavigationSections, settingsNavItem } from '../../data/navigation';
 import type { NavItem } from '../../data/navigation';
 import { useApiHealth } from '../../hooks/useApiHealth';
 import { BrandMark } from './BrandMark';
@@ -17,8 +18,10 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed, mobileOpen, onToggleCollapsed, onCloseMobile }: SidebarProps) {
   const { state: apiState, health } = useApiHealth();
-  const { session } = useAuth();
-  const workspace = session?.workspaces[0];
+  const { session, activeWorkspace, hasAnyPermission, setActiveWorkspace } = useAuth();
+  const workspace = activeWorkspace;
+  const visibleSections = filterNavigationSections(hasAnyPermission);
+  const showSettings = canAccessNavItem(settingsNavItem, hasAnyPermission);
 
   useEffect(() => {
     if (!mobileOpen) {
@@ -142,7 +145,7 @@ export function Sidebar({ collapsed, mobileOpen, onToggleCollapsed, onCloseMobil
         </div>
 
         <nav className="sidebar-scroll flex-1 overflow-y-auto px-3 py-4">
-          {navigationSections.map((section, sectionIndex) => (
+          {visibleSections.map((section, sectionIndex) => (
             <div key={section.label} className={cn(sectionIndex > 0 && 'pt-5')}>
               <p
                 className={cn(
@@ -165,9 +168,11 @@ export function Sidebar({ collapsed, mobileOpen, onToggleCollapsed, onCloseMobil
             </div>
           ))}
 
-          <div className="mt-5 border-t border-white/[0.06] pt-4">
-            {renderNavItem(settingsNavItem)}
-          </div>
+          {showSettings ? (
+            <div className="mt-5 border-t border-white/[0.06] pt-4">
+              {renderNavItem(settingsNavItem)}
+            </div>
+          ) : null}
         </nav>
 
         <div className="shrink-0 border-t border-white/[0.06] p-3">
@@ -182,12 +187,30 @@ export function Sidebar({ collapsed, mobileOpen, onToggleCollapsed, onCloseMobil
               <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-ivory/[0.07] text-ivory/60">
                 <Building2 size={13} strokeWidth={1.8} aria-hidden="true" />
               </span>
-              <span className={cn('min-w-0', collapsed && 'lg:hidden')}>
-                <span className="block truncate text-[10.5px] font-medium text-ivory/75">
-                  {workspace.name}
-                </span>
-                <span className="mt-0.5 block truncate text-[8.5px] capitalize tracking-[0.06em] text-ivory/30">
-                  {workspace.role} · {workspace.currency}
+              <span className={cn('min-w-0 flex-1', collapsed && 'lg:hidden')}>
+                {session && session.workspaces.length > 1 ? (
+                  <label className="block">
+                    <span className="sr-only">Active workspace</span>
+                    <select
+                      aria-label="Active workspace"
+                      value={workspace.id}
+                      onChange={(event) => setActiveWorkspace(event.target.value)}
+                      className="w-full cursor-pointer truncate rounded-md border-0 bg-transparent p-0 text-[10.5px] font-medium text-ivory/75 outline-none focus:ring-2 focus:ring-ivory/30"
+                    >
+                      {session.workspaces.map((entry) => (
+                        <option key={entry.id} value={entry.id} className="bg-espresso text-ivory">
+                          {entry.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <span className="block truncate text-[10.5px] font-medium text-ivory/75">
+                    {workspace.name}
+                  </span>
+                )}
+                <span className="mt-0.5 block truncate text-[8.5px] tracking-[0.06em] text-ivory/30">
+                  {ROLE_LABELS[workspace.role]} · {workspace.currency}
                 </span>
               </span>
             </div>

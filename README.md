@@ -1,33 +1,48 @@
 # ProcureFlow
 
-ProcureFlow is a premium procurement workspace for modern teams. Phase 2 builds on the Phase 1
-interface with a PostgreSQL data architecture, Prisma persistence, and secure cookie-based
-authentication.
+ProcureFlow is a premium procurement workspace for modern teams. Phase 3 adds workspace-scoped
+role-based access control, permission-aware APIs and navigation, member and invitation management,
+and an append-only audit trail on top of the Phase 2 authentication and database foundation.
 
-The dashboard, design system, and navigation are preserved. New in this phase: self-service
-registration, sign-in and sign-out, persistent sessions, workspace membership, and the full
-procurement database model that Phase 3 workflows will build on.
+The Phase 1 visual identity and every Phase 2 authentication flow are preserved. Roles always come
+from the signed-in user's `WorkspaceMember` record, never from a global user role.
 
-## Phase 2 scope
+## Phase 3 scope
+
+- Six workspace roles: `owner`, `admin`, `procurement_manager`, `requester`, `approver`, and
+  `viewer`, with a centralized permission registry shared by the API and web app.
+- Permission enforcement on every member, invitation, and workspace-permission endpoint, including
+  workspace membership checks, resource scoping, and consistent `401`, `403`, and `404` responses.
+- Member directory with pagination, search, role and status filters, member details, role changes,
+  suspension, reactivation, and removal.
+- One-time workspace invitations with cryptographically random tokens, SHA-256 token hashes at
+  rest, expiration, revocation, acceptance, duplicate-invitation protection, and a development-only
+  copy-link flow.
+- Membership integrity: the last active owner is protected, admins cannot manage owners or peers,
+  ownership changes are owner-only, self-management is rejected, and sensitive mutations serialize
+  through a workspace row lock.
+- Append-only audit events for invitation creation, acceptance, revocation, expiration, role
+  changes, suspension, reactivation, removal, and invitation-link rotation.
+- Settings → team management UI with a role/permission summary, member table, invite flow, pending
+  invitations, confirmations, loading and error states, and permission-aware navigation.
+- Integration and UI tests covering every role mapping, cross-workspace isolation, invitation
+  lifecycle, escalation attempts, last-owner concurrency, suspension/removal, and audit creation.
+
+Phase 2 foundation retained in this phase:
 
 - PostgreSQL 17 schema managed with Prisma 6, including users, workspaces, memberships, vendors,
   purchase requests and items, approvals and steps, quotations and items, purchase orders and
   items, deliveries, and append-only audit logs.
-- Workspace-scoped records with foreign keys, unique constraints, indexes, and explicit cascade,
-  restrict, and set-null deletion behaviour.
-- Fixed-precision `Decimal` money and quantity fields; no floating-point currency storage.
-- Cookie-based authentication: register, login, logout, and `GET /api/auth/me`.
-- bcrypt password hashing (cost 12), HS256 JWTs signed with `jose`, and an `HttpOnly`,
-  `SameSite=Lax` session cookie that is `Secure` in production.
-- Zod request validation with consistent error envelopes, credentialed CORS, and rate limiting on
-  register and login.
-- React authentication state, protected and public-only routes, session restore on refresh,
-  validation feedback, loading states, and profile-menu sign-out.
-- Integration tests against a dedicated PostgreSQL test database with real migrations.
+- Cookie-based authentication: register, login, logout, and `GET /api/auth/me`, with bcrypt
+  password hashing, HS256 JWTs, and an `HttpOnly`, `SameSite=Lax` session cookie.
+- Zod request validation, consistent error envelopes, credentialed CORS, and rate limiting.
+- React authentication state, protected and public-only routes, session restore, validation
+  feedback, and sign-out.
 - A realistic seed workspace covering the request-to-delivery lifecycle.
 
-Not included in Phase 2: role-based authorization and procurement workflow execution. The schema
-stores workspace roles and workflow-ready approval steps, but Phase 2 does not enforce them.
+Not included in Phase 3: procurement workflow execution, request/approval state transitions,
+vendor management, sourcing, purchase-order operations, and delivery receiving. Those remain Phase
+4 work; the module pages continue to present polished placeholders.
 
 ## Stack
 
@@ -66,37 +81,38 @@ ProcureFlow/
 ├── apps/
 │   ├── server/                 # Express API + Prisma
 │   │   ├── prisma/
-│   │   │   ├── schema.prisma   # Phase 2 data model
+│   │   │   ├── schema.prisma   # Phase 3 data model
 │   │   │   ├── migrations/     # Versioned SQL migrations
 │   │   │   └── seed.ts         # Development dataset
 │   │   ├── prisma.config.ts    # Prisma CLI configuration
 │   │   └── src/
 │   │       ├── config/         # Typed environment configuration
-│   │       ├── controllers/    # HTTP layer
+│   │       ├── controllers/    # HTTP layer, including member/invitation APIs
 │   │       ├── errors/         # Operational error type
-│   │       ├── lib/            # Prisma, password, JWT, cookie helpers
-│   │       ├── middleware/     # Auth, validation, rate limit, errors
-│   │       ├── routes/         # Auth and health routers
-│   │       ├── services/       # Registration and login transactions
+│   │       ├── lib/            # Prisma, password, JWT, audit, role helpers
+│   │       ├── middleware/     # Auth, workspace authorization, validation
+│   │       ├── routes/         # Auth, workspace, invitation, and health routers
+│   │       ├── services/       # Auth, member, and invitation transactions
 │   │       ├── test/           # Test DB setup and factories
-│   │       ├── validators/     # Zod auth schemas
+│   │       ├── validators/     # Zod auth and workspace schemas
 │   │       ├── app.ts          # Express app factory
 │   │       └── index.ts        # Server bootstrap
 │   └── web/                    # React workspace
 │       └── src/
-│           ├── auth/           # AuthProvider, protected routes, loader
+│           ├── auth/           # AuthProvider, route guards, permission gate
 │           ├── components/
 │           │   ├── auth/       # Auth layout, fields, banners
 │           │   ├── dashboard/  # KPIs, analytics, timeline, tables
 │           │   ├── layout/     # Shell, sidebar, header, search
+│           │   ├── settings/   # Team management dialogs and role summary
 │           │   └── ui/         # Design-system primitives
-│           ├── data/           # Typed demo data and navigation
+│           ├── data/           # Typed demo data and permission-aware navigation
 │           ├── hooks/
-│           ├── lib/            # API client, validation, formatting
-│           ├── pages/          # Dashboard, login, register, modules
+│           ├── lib/            # API client, workspace API, formatting
+│           ├── pages/          # Dashboard, auth, settings, invitations, modules
 │           └── test/
 ├── packages/
-│   └── shared/                 # Shared API, auth, and procurement contracts
+│   └── shared/                 # API, auth, permission, member, procurement contracts
 ├── .env.example
 ├── eslint.config.js
 ├── tsconfig.base.json
@@ -153,7 +169,7 @@ variables always take precedence. The web app proxies `/api` to the API server.
 | `NODE_ENV`                       | `development`           | Runtime environment                   |
 | `PORT`                           | `4000`                  | API port                              |
 | `CORS_ORIGIN`                    | `http://localhost:5173` | Comma-separated allowed origins       |
-| `APP_VERSION`                    | `0.2.0`                 | Version returned by the health check  |
+| `APP_VERSION`                    | `0.3.0`                 | Version returned by the health check  |
 | `DATABASE_URL`                   | —                       | Development PostgreSQL connection     |
 | `TEST_DATABASE_URL`              | —                       | Dedicated integration-test database   |
 | `JWT_SECRET`                     | —                       | HS256 signing secret (32+ characters) |
@@ -168,9 +184,17 @@ variables always take precedence. The web app proxies `/api` to the API server.
 | `AUTH_RATE_LIMIT_WINDOW_MINUTES` | `15`                    | Login/register rate-limit window      |
 | `AUTH_RATE_LIMIT_MAX`            | `20`                    | Attempts per window per IP            |
 | `TRUST_PROXY`                    | `0`                     | Express trust-proxy hops              |
+| `INVITATION_DELIVERY`            | `link`                  | `link` (development) or `email`       |
+| `INVITATION_TTL_HOURS`           | `72`                    | Invitation lifetime                   |
+| `WEB_APP_URL`                    | `http://localhost:5173` | Base URL used to build invite links   |
 | `VITE_API_PROXY_TARGET`          | `http://localhost:4000` | Optional Vite proxy target            |
 
 `COOKIE_SAME_SITE=none` requires `COOKIE_SECURE=true`.
+
+`INVITATION_DELIVERY=link` is a development-only flow: invitation creation and copy-link responses
+include the raw one-time token so it can be shared manually. With `email`, raw tokens are omitted
+from API responses; production email delivery must be implemented separately before using that mode.
+Only token hashes are stored in either mode.
 
 ### Migrate and seed
 
@@ -185,19 +209,22 @@ For an existing environment, apply committed migrations without creating new one
 npm run db:deploy
 ```
 
-The seed resets the `Northwind Industrial` workspace and upserts five development users. Every
+The seed resets the `Northwind Industrial` workspace and upserts six development users. Every
 seeded account uses the development-only password `ProcureFlow!2026`.
 
-| User                               | Role     |
-| ---------------------------------- | -------- |
-| `amara.okafor@northwind.example`   | Owner    |
-| `daniel.reyes@northwind.example`   | Admin    |
-| `priya.nair@northwind.example`     | Approver |
-| `marcus.chen@northwind.example`    | Buyer    |
-| `sofia.lindberg@northwind.example` | Viewer   |
+| User                               | Role                |
+| ---------------------------------- | ------------------- |
+| `amara.okafor@northwind.example`   | Owner               |
+| `daniel.reyes@northwind.example`   | Admin               |
+| `marcus.chen@northwind.example`    | Procurement manager |
+| `priya.nair@northwind.example`     | Approver            |
+| `nadia.hassan@northwind.example`   | Requester           |
+| `sofia.lindberg@northwind.example` | Viewer              |
 
 The seeded workspace contains 7 vendors, 7 purchase requests, 8 quotations, 3 purchase orders,
-4 deliveries, and 20 audit entries.
+4 deliveries, and 20 audit entries. Use these accounts to exercise each role: the owner can manage
+everyone, the admin cannot manage owners or peers, the requester can create requests but cannot
+open approvals, and the viewer has read-only access.
 
 ### Develop
 
@@ -222,7 +249,7 @@ curl http://localhost:4000/api/health
 {
   "status": "ok",
   "service": "procureflow-api",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "environment": "development",
   "uptimeSeconds": 12,
   "timestamp": "2026-11-09T09:00:00.000Z"
@@ -262,24 +289,90 @@ The session cookie is `HttpOnly`, `SameSite=Lax`, scoped to `/`, and `Secure` in
 are verified for signature, issuer, audience, and expiry on every protected request. Invalid or
 expired tokens return `401` without exposing internal details.
 
+## Roles and permissions
+
+The canonical permission registry lives in `packages/shared/src/permissions.ts` and is consumed by
+both the API policy layer and the web interface. A role is always read from the active
+`WorkspaceMember`; it is never derived from a global user attribute.
+
+| Role                  | Scope                                                                          |
+| --------------------- | ------------------------------------------------------------------------------ |
+| `owner`               | Full workspace control, including ownership and member administration          |
+| `admin`               | Workspace settings and member administration, excluding ownership changes      |
+| `procurement_manager` | Vendors, requests, quotations, purchase orders, deliveries, and reports        |
+| `approver`            | Assigned approvals, approval decisions, and read access to procurement records |
+| `requester`           | Creates and manages their own purchase requests                                |
+| `viewer`              | Read-only access to permitted workspace information                            |
+
+Management rules are conservative:
+
+- Owners can manage every other member and are the only role that can assign ownership.
+- Admins cannot manage owners or other admins, and cannot grant the owner or admin role.
+- Self role changes, self suspension, and self removal return `409 CANNOT_MODIFY_SELF`.
+- A workspace must always retain at least one active owner. Sensitive membership mutations take a
+  PostgreSQL `FOR UPDATE` lock on the workspace row so concurrent owner changes cannot race past the
+  last-owner check.
+
+## Workspace and invitation API
+
+| Method   | Endpoint                                                    | Permission            |
+| -------- | ----------------------------------------------------------- | --------------------- |
+| `GET`    | `/api/workspaces/:workspaceId/members`                      | `members:read`        |
+| `GET`    | `/api/workspaces/:workspaceId/members/:memberId`            | `members:read`        |
+| `PATCH`  | `/api/workspaces/:workspaceId/members/:memberId/role`       | `members:role_change` |
+| `POST`   | `/api/workspaces/:workspaceId/members/:memberId/suspend`    | `members:suspend`     |
+| `POST`   | `/api/workspaces/:workspaceId/members/:memberId/reactivate` | `members:suspend`     |
+| `DELETE` | `/api/workspaces/:workspaceId/members/:memberId`            | `members:remove`      |
+| `GET`    | `/api/workspaces/:workspaceId/permissions`                  | `workspace:read`      |
+| `GET`    | `/api/workspaces/:workspaceId/invitations`                  | `members:read`        |
+| `POST`   | `/api/workspaces/:workspaceId/invitations`                  | `members:invite`      |
+| `POST`   | `/api/workspaces/:workspaceId/invitations/:id/revoke`       | `members:invite`      |
+| `POST`   | `/api/workspaces/:workspaceId/invitations/:id/link`         | `members:invite`      |
+| `POST`   | `/api/invitations/accept`                                   | Authenticated user    |
+
+Member listing supports `page`, `pageSize`, `search`, `role`, and `status`. Invitation listing
+supports `page`, `pageSize`, and `status`.
+
+Authorization behaviour:
+
+- Missing or invalid sessions return `401`.
+- A valid session without the required workspace permission returns `403`.
+- A workspace the user does not belong to returns `404 WORKSPACE_NOT_FOUND`; member and invitation
+  IDs from another workspace return `404` without revealing that the record exists.
+- Suspended memberships remain authenticated but receive `403 MEMBERSHIP_SUSPENDED` on workspace
+  routes and are omitted from the `/api/auth/me` workspace list.
+
+Invitation tokens are 32 random bytes encoded as base64url. Only the SHA-256 hash is stored. A
+partial unique `activeKey` prevents more than one pending invitation per workspace and email.
+Acceptance requires an authenticated account whose email matches the invitation. The API returns
+`410` for expired or revoked invitations and `409` for invitations that were already accepted.
+`INVITATION_DELIVERY=link` returns the one-time link once for development copy-link flows; copying
+a pending invitation again rotates its token and invalidates the previous link.
+
+Audit events are written in the same transaction as the change and cover `invitation.created`,
+`invitation.accepted`, `invitation.revoked`, `invitation.expired`, `invitation.link_regenerated`,
+`member.role_changed`, `member.suspended`, `member.reactivated`, and `member.removed`. Audit metadata
+is redacted by key and never contains tokens, hashes, passwords, JWTs, or cookies.
+
 ## Database model
 
-| Model                 | Purpose                                                        |
-| --------------------- | -------------------------------------------------------------- |
-| `User`                | Account identity and bcrypt password hash                      |
-| `Workspace`           | Tenant boundary and base currency                              |
-| `WorkspaceMember`     | User-to-workspace role (owner, admin, approver, buyer, viewer) |
-| `Vendor`              | Supplier master data scoped to a workspace                     |
-| `PurchaseRequest`     | Request header with status, priority, category, and totals     |
-| `PurchaseRequestItem` | Request line items with quantity, unit, and money              |
-| `Approval`            | Workflow container linked one-to-one with a request            |
-| `ApprovalStep`        | Ordered approver steps with decision notes                     |
-| `Quotation`           | Vendor quote for a request                                     |
-| `QuotationItem`       | Quote lines linked to request items                            |
-| `PurchaseOrder`       | Issued order with vendor, optional quote, and totals           |
-| `PurchaseOrderItem`   | Order lines with received quantity                             |
-| `Delivery`            | Shipment against a purchase order                              |
-| `AuditLog`            | Append-only workspace activity record                          |
+| Model                 | Purpose                                                     |
+| --------------------- | ----------------------------------------------------------- |
+| `User`                | Account identity and bcrypt password hash                   |
+| `Workspace`           | Tenant boundary and base currency                           |
+| `WorkspaceMember`     | User-to-workspace role and active/suspended status          |
+| `WorkspaceInvitation` | One-time hashed invitation with expiry and lifecycle status |
+| `Vendor`              | Supplier master data scoped to a workspace                  |
+| `PurchaseRequest`     | Request header with status, priority, category, and totals  |
+| `PurchaseRequestItem` | Request line items with quantity, unit, and money           |
+| `Approval`            | Workflow container linked one-to-one with a request         |
+| `ApprovalStep`        | Ordered approver steps with decision notes                  |
+| `Quotation`           | Vendor quote for a request                                  |
+| `QuotationItem`       | Quote lines linked to request items                         |
+| `PurchaseOrder`       | Issued order with vendor, optional quote, and totals        |
+| `PurchaseOrderItem`   | Order lines with received quantity                          |
+| `Delivery`            | Shipment against a purchase order                           |
+| `AuditLog`            | Append-only workspace activity record                       |
 
 Money uses `Decimal(14,2)`; quantities use `Decimal(12,2)`. Tables and columns use snake_case
 mappings, and all business records carry `workspaceId` indexes for tenant-scoped queries.
@@ -318,7 +411,16 @@ Coverage includes:
 - Field-level Zod validation.
 - Request-to-delivery relationships, fixed-precision money, workspace-scoped uniqueness, cascade
   deletion, restrict deletion, and tenant isolation.
-- Frontend redirects, login and registration flows, validation feedback, API errors, and sign-out.
+- Every role-to-permission mapping through `/api/auth/me` and `/api/workspaces/:id/permissions`.
+- Unauthenticated `401`, unauthorized `403`, and cross-workspace `404` behaviour.
+- Invitation creation, hashed storage, duplicate prevention, acceptance, email matching, expiry,
+  revocation, reuse rejection, and link rotation.
+- Role changes, self-management rejection, admin hierarchy limits, ownership assignment, and
+  concurrent last-owner demotion/suspension.
+- Suspension, reactivation, removal, suspended-session behaviour, and audit event contents.
+- Member pagination, search, role/status filters, and validation errors.
+- Frontend role-aware navigation, restricted routes, Settings team management, invitation
+  acceptance, suspended access, API errors, and existing authentication flows.
 
 ## Security notes
 
@@ -327,15 +429,22 @@ Coverage includes:
 - Unknown-email logins still perform a bcrypt comparison to reduce timing differences.
 - CORS allows only configured origins and sends credentials.
 - Login and registration are rate limited per IP.
+- Workspace permissions are enforced by the API on every protected operation; hiding UI controls
+  is only a usability layer.
+- Invitation tokens are stored as SHA-256 hashes, omitted from listings, and never written to audit
+  metadata. Copying a pending invitation rotates its token.
+- Membership and invitation mutations run in transactions, and workspace row locks serialize
+  last-owner checks under concurrent requests.
 - Unexpected errors return a generic `500` envelope without stacks or internal messages.
-- Audit logs have no update path and are intended to remain append-only.
+- Audit logs have no update or delete API and remain append-only.
 
 ## Phase boundaries
 
-Phase 2 delivers persistence and authentication. Role checks, approval decisions, request and
-order mutations, vendor management, and the other procurement workflows remain Phase 3 work. The
-module pages continue to present polished placeholders so navigation stays complete without
-pretending those workflows are implemented.
+Phase 3 delivers workspace-scoped RBAC, member and invitation administration, permission-aware UI,
+and audit logging. Procurement workflow execution — request intake and state transitions, approval
+decisions, vendor management, sourcing, purchase orders, and delivery receiving — remains Phase 4
+work. The module pages continue to present polished placeholders so navigation stays complete
+without pretending those workflows are implemented.
 
 ## License
 

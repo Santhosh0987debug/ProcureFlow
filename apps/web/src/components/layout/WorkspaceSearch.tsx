@@ -2,8 +2,9 @@ import { CornerDownLeft, Search } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../auth/AuthContext';
 import { cn } from '../../lib/cn';
-import { navigationItems } from '../../data/navigation';
+import { filterNavigationItems } from '../../data/navigation';
 import type { NavItem } from '../../data/navigation';
 import { useDismissable } from '../../hooks/useDismissable';
 
@@ -12,8 +13,6 @@ interface WorkspaceSearchProps {
   autoFocus?: boolean;
   onNavigate?: () => void;
 }
-
-const searchableItems = navigationItems;
 
 export function WorkspaceSearch({
   className,
@@ -27,6 +26,11 @@ export function WorkspaceSearch({
   const inputRef = useRef<HTMLInputElement>(null);
   const listboxId = useId().replaceAll(':', '');
   const navigate = useNavigate();
+  const { hasAnyPermission } = useAuth();
+  const searchableItems = useMemo(
+    () => filterNavigationItems(hasAnyPermission),
+    [hasAnyPermission],
+  );
 
   useDismissable(open, () => setOpen(false), containerRef);
 
@@ -45,7 +49,7 @@ export function WorkspaceSearch({
 
       return labelMatches || keywordMatches;
     });
-  }, [query]);
+  }, [query, searchableItems]);
 
   const activeItem = results[activeIndex];
 
