@@ -18,6 +18,7 @@ import {
 import { authenticate } from '../middleware/authenticate.js';
 import { authorizeWorkspace } from '../middleware/authorize.js';
 import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
+import { purchaseRequestRouter } from './purchase-request.routes.js';
 import {
   changeMemberRoleSchema,
   invitationParamsSchema,
@@ -31,6 +32,8 @@ import {
 export const workspaceRouter = Router();
 
 workspaceRouter.use(authenticate);
+
+workspaceRouter.use('/:workspaceId/purchase-requests', purchaseRequestRouter);
 
 workspaceRouter.get(
   '/:workspaceId/members',

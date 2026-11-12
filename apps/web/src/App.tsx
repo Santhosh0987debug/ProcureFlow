@@ -13,6 +13,10 @@ import RegisterPage from './pages/RegisterPage';
 import SettingsPage from './pages/SettingsPage';
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const PurchaseRequestsPage = lazy(() => import('./pages/PurchaseRequestsPage'));
+const PurchaseRequestCreatePage = lazy(() => import('./pages/PurchaseRequestCreatePage'));
+const PurchaseRequestDetailPage = lazy(() => import('./pages/PurchaseRequestDetailPage'));
+const PurchaseRequestEditPage = lazy(() => import('./pages/PurchaseRequestEditPage'));
 
 export function App() {
   return (
@@ -32,7 +36,31 @@ export function App() {
               path="purchase-requests"
               element={
                 <PermissionGate anyOf={[Permission.RequestsRead, Permission.RequestsReadOwn]}>
-                  <ModulePage moduleKey="purchaseRequests" />
+                  <PurchaseRequestsPage />
+                </PermissionGate>
+              }
+            />
+            <Route
+              path="purchase-requests/new"
+              element={
+                <PermissionGate anyOf={[Permission.RequestsCreate]}>
+                  <PurchaseRequestCreatePage />
+                </PermissionGate>
+              }
+            />
+            <Route
+              path="purchase-requests/:requestId"
+              element={
+                <PermissionGate anyOf={[Permission.RequestsRead, Permission.RequestsReadOwn]}>
+                  <PurchaseRequestDetailPage />
+                </PermissionGate>
+              }
+            />
+            <Route
+              path="purchase-requests/:requestId/edit"
+              element={
+                <PermissionGate anyOf={[Permission.RequestsUpdate]}>
+                  <PurchaseRequestEditPage />
                 </PermissionGate>
               }
             />

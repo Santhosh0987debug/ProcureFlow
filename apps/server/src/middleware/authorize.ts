@@ -21,7 +21,7 @@ function workspaceNotFoundError(): AppError {
  */
 export function requireWorkspaceAuthorization(
   request: Request,
-  permission?: Permission,
+  permission?: Permission | readonly Permission[],
 ): WorkspaceAuthorizationContext {
   const user = requireAuthenticatedUser(request);
   const workspaceId = request.params.workspaceId;
@@ -43,11 +43,16 @@ export function requireWorkspaceAuthorization(
     });
   }
 
-  if (permission && !roleHasPermission(toWorkspaceRole(membership.role), permission)) {
-    throw new AppError('You do not have permission to perform this action.', {
-      statusCode: 403,
-      code: 'FORBIDDEN',
-    });
+  if (permission) {
+    const requiredPermissions = Array.isArray(permission) ? permission : [permission];
+    const role = toWorkspaceRole(membership.role);
+
+    if (!requiredPermissions.some((entry) => roleHasPermission(role, entry))) {
+      throw new AppError('You do not have permission to perform this action.', {
+        statusCode: 403,
+        code: 'FORBIDDEN',
+      });
+    }
   }
 
   return { id: workspaceId, membership };
@@ -57,6 +62,21 @@ export function authorizeWorkspace(permission: Permission): RequestHandler {
   return (request, _response, next) => {
     try {
       request.workspace = requireWorkspaceAuthorization(request, permission);
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
+/**
+ * Accept any one of the supplied permissions. Used where a workspace-wide read
+ * permission and an ownership-scoped read permission both unlock the route.
+ */
+export function authorizeWorkspaceAny(permissions: readonly Permission[]): RequestHandler {
+  return (request, _response, next) => {
+    try {
+      request.workspace = requireWorkspaceAuthorization(request, permissions);
       next();
     } catch (error) {
       next(error);

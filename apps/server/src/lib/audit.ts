@@ -12,6 +12,10 @@ export const AuditAction = {
   MemberSuspended: 'member.suspended',
   MemberReactivated: 'member.reactivated',
   MemberRemoved: 'member.removed',
+  PurchaseRequestCreated: 'purchase_request.created',
+  PurchaseRequestUpdated: 'purchase_request.updated',
+  PurchaseRequestDeleted: 'purchase_request.deleted',
+  PurchaseRequestSubmitted: 'purchase_request.submitted',
 } as const;
 
 const SENSITIVE_KEY_PATTERN = /token|password|secret|hash|jwt|cookie|authorization/i;

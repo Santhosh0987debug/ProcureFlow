@@ -13,6 +13,24 @@ export function formatMoney(money: Money): string {
   return formatCurrency(money.amount, money.currency);
 }
 
+/**
+ * Formats an exact fixed-point amount (for example a request total) without
+ * dropping cents. API monetary values arrive as decimal strings.
+ */
+export function formatAmount(
+  value: string | number,
+  currency: Currency | string = Currency.USD,
+): string {
+  const amount = typeof value === 'string' ? Number(value) : value;
+
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(amount) ? amount : 0);
+}
+
 export function formatCompactCurrency(
   amount: number,
   currency: Currency | string = Currency.USD,

@@ -1,18 +1,48 @@
 # ProcureFlow
 
-ProcureFlow is a premium procurement workspace for modern teams. Phase 3 adds workspace-scoped
-role-based access control, permission-aware APIs and navigation, member and invitation management,
-and an append-only audit trail on top of the Phase 2 authentication and database foundation.
+ProcureFlow is a premium procurement workspace for modern teams. Phase 4 adds complete purchase
+request intake: draft creation with multiple line items, a paginated and filterable request list, a
+detail workspace with activity history, draft editing and soft deletion, and explicit submission for
+approval. All of it builds on the Phase 3 workspace-scoped RBAC and append-only audit trail.
 
-The Phase 1 visual identity and every Phase 2 authentication flow are preserved. Roles always come
-from the signed-in user's `WorkspaceMember` record, never from a global user role.
+The Phase 1 visual identity and every Phase 2 and Phase 3 authentication, RBAC, and team management
+flow are preserved. Roles always come from the signed-in user's `WorkspaceMember` record, never from
+a global user role.
 
-## Phase 3 scope
+## Phase 4 scope
+
+- Purchase request creation with validated header fields and up to 50 line items. The API calculates
+  every line total and the request total with Prisma `Decimal`; client-supplied totals are rejected.
+- Paginated, searchable request listing with status, requester, category, priority, department, and
+  date filters, plus workspace summary metrics.
+- Request detail with requester identity, line items, fixed-point totals, timestamps, notes, and
+  authorized activity history.
+- Draft editing with transactional line-item replacement and total recalculation.
+- Soft deletion of eligible drafts using `deletedAt` and `deletedById`; deleted requests disappear
+  from normal reads while the append-only audit trail remains.
+- Explicit submission that validates completeness, recomputes canonical totals, locks the request,
+  and moves it to `pending_approval` for Phase 5. Submitted requests cannot be edited, deleted, or
+  resubmitted.
+- Workspace-scoped, human-readable request numbers (`PR-<year>-<sequence>`) generated under a
+  workspace row lock so concurrent creations cannot collide.
+- Ownership-aware authorization: requesters manage their own drafts, procurement managers and admins
+  manage workspace requests according to permissions, approvers do not submit, and viewers remain
+  read-only.
+- Append-only audit events for request creation, updates, deletion, and submission with sanitized
+  metadata and actor attribution.
+- Complete web experience: request list, create/edit form with dynamic line items and live totals,
+  detail page with actions and timeline, pagination, and loading, empty, and error states.
+- Integration and UI tests covering validation, Decimal precision, numbering and concurrency,
+  lifecycle rules, ownership, role permissions, cross-workspace isolation, audit, rollback, and
+  duplicate submission.
+
+Phase 3 foundation retained:
 
 - Six workspace roles: `owner`, `admin`, `procurement_manager`, `requester`, `approver`, and
   `viewer`, with a centralized permission registry shared by the API and web app.
-- Permission enforcement on every member, invitation, and workspace-permission endpoint, including
-  workspace membership checks, resource scoping, and consistent `401`, `403`, and `404` responses.
+- Permission enforcement on every member, invitation, request, and workspace-permission endpoint,
+  including workspace membership checks, resource scoping, and consistent `401`, `403`, and `404`
+  responses.
 - Member directory with pagination, search, role and status filters, member details, role changes,
   suspension, reactivation, and removal.
 - One-time workspace invitations with cryptographically random tokens, SHA-256 token hashes at
@@ -40,9 +70,10 @@ Phase 2 foundation retained in this phase:
   feedback, and sign-out.
 - A realistic seed workspace covering the request-to-delivery lifecycle.
 
-Not included in Phase 3: procurement workflow execution, request/approval state transitions,
-vendor management, sourcing, purchase-order operations, and delivery receiving. Those remain Phase
-4 work; the module pages continue to present polished placeholders.
+Not included in Phase 4: approval decisions, approver assignment and routing, vendor management,
+sourcing, purchase-order operations, and delivery receiving. Those remain Phase 5 work; the module
+pages continue to present polished placeholders. Submitted requests are ready for the Phase 5
+approval workflow.
 
 ## Stack
 
@@ -81,20 +112,20 @@ ProcureFlow/
 ├── apps/
 │   ├── server/                 # Express API + Prisma
 │   │   ├── prisma/
-│   │   │   ├── schema.prisma   # Phase 3 data model
+│   │   │   ├── schema.prisma   # Phase 4 data model
 │   │   │   ├── migrations/     # Versioned SQL migrations
 │   │   │   └── seed.ts         # Development dataset
 │   │   ├── prisma.config.ts    # Prisma CLI configuration
 │   │   └── src/
 │   │       ├── config/         # Typed environment configuration
-│   │       ├── controllers/    # HTTP layer, including member/invitation APIs
+│   │       ├── controllers/    # HTTP layer, including request/member APIs
 │   │       ├── errors/         # Operational error type
 │   │       ├── lib/            # Prisma, password, JWT, audit, role helpers
 │   │       ├── middleware/     # Auth, workspace authorization, validation
-│   │       ├── routes/         # Auth, workspace, invitation, and health routers
-│   │       ├── services/       # Auth, member, and invitation transactions
+│   │       ├── routes/         # Auth, workspace, request, invitation, health routers
+│   │       ├── services/       # Request, auth, member, and invitation transactions
 │   │       ├── test/           # Test DB setup and factories
-│   │       ├── validators/     # Zod auth and workspace schemas
+│   │       ├── validators/     # Zod auth, workspace, and request schemas
 │   │       ├── app.ts          # Express app factory
 │   │       └── index.ts        # Server bootstrap
 │   └── web/                    # React workspace
@@ -104,12 +135,13 @@ ProcureFlow/
 │           │   ├── auth/       # Auth layout, fields, banners
 │           │   ├── dashboard/  # KPIs, analytics, timeline, tables
 │           │   ├── layout/     # Shell, sidebar, header, search
+│           │   ├── requests/   # Request form, badges, loading/error states
 │           │   ├── settings/   # Team management dialogs and role summary
 │           │   └── ui/         # Design-system primitives
-│           ├── data/           # Typed demo data and permission-aware navigation
+│           ├── data/           # Typed demo data, options, permission-aware navigation
 │           ├── hooks/
-│           ├── lib/            # API client, workspace API, formatting
-│           ├── pages/          # Dashboard, auth, settings, invitations, modules
+│           ├── lib/            # API clients, formatting, error mapping
+│           ├── pages/          # Dashboard, purchase requests, auth, settings, modules
 │           └── test/
 ├── packages/
 │   └── shared/                 # API, auth, permission, member, procurement contracts
@@ -354,25 +386,65 @@ Audit events are written in the same transaction as the change and cover `invita
 `member.role_changed`, `member.suspended`, `member.reactivated`, and `member.removed`. Audit metadata
 is redacted by key and never contains tokens, hashes, passwords, JWTs, or cookies.
 
+## Purchase request API
+
+| Method   | Endpoint                                                           | Permission                    |
+| -------- | ------------------------------------------------------------------ | ----------------------------- |
+| `GET`    | `/api/workspaces/:workspaceId/purchase-requests`                   | `requests:read` or `read_own` |
+| `POST`   | `/api/workspaces/:workspaceId/purchase-requests`                   | `requests:create`             |
+| `GET`    | `/api/workspaces/:workspaceId/purchase-requests/:requestId`        | `requests:read` or `read_own` |
+| `PATCH`  | `/api/workspaces/:workspaceId/purchase-requests/:requestId`        | `requests:update`             |
+| `DELETE` | `/api/workspaces/:workspaceId/purchase-requests/:requestId`        | `requests:delete`             |
+| `POST`   | `/api/workspaces/:workspaceId/purchase-requests/:requestId/submit` | `requests:submit`             |
+
+Request listing supports `page`, `pageSize`, `search`, `status`, `requesterId`, `category`,
+`priority`, `department`, `from`, and `to`. The response includes the page plus workspace summary
+metrics for total, draft, pending-approval, and approved requests.
+
+Write payloads contain header fields and an `items` array. Monetary and quantity values cross the
+API boundary as fixed-point strings; strict Zod schemas reject unknown fields, non-positive values,
+more than two decimal places, and any client-supplied `totalAmount` or `lineTotal`. The server
+recalculates every line total and the request total with Prisma `Decimal` inside the same transaction
+that writes the request and its items.
+
+Request numbers follow `PR-<UTC year>-<sequence>` and are unique within a workspace. Generation runs
+inside a workspace row lock, so concurrent creations receive distinct sequential numbers. Draft
+updates replace all line items atomically; a failed write rolls the whole change back.
+
+Submission is explicit and draft-only. It validates required fields, at least one item, positive
+quantities and prices, and a non-past required-by date; recomputes canonical totals; records
+`submittedAt`; and moves the request to `pending_approval` for Phase 5. Repeat submission returns
+`409 REQUEST_ALREADY_SUBMITTED`, while edits or deletes of a submitted request return
+`409 REQUEST_NOT_DRAFT`. Deletion is a soft delete (`deletedAt`, `deletedById`), after which normal
+reads return `404 REQUEST_NOT_FOUND`.
+
+Requesters only see and manage their own records unless they also hold workspace-wide
+`requests:read`. Procurement managers and admins manage workspace requests according to their
+permissions; approvers have read access but cannot submit; viewers remain read-only. Every operation
+is scoped by `workspaceId`, and requests from another workspace return `404` without revealing their
+existence. Creation, updates, deletion, and submission write append-only audit events under the
+`purchase_request.*` actions with actor, workspace, request reference, timestamp, and sanitized
+metadata.
+
 ## Database model
 
-| Model                 | Purpose                                                     |
-| --------------------- | ----------------------------------------------------------- |
-| `User`                | Account identity and bcrypt password hash                   |
-| `Workspace`           | Tenant boundary and base currency                           |
-| `WorkspaceMember`     | User-to-workspace role and active/suspended status          |
-| `WorkspaceInvitation` | One-time hashed invitation with expiry and lifecycle status |
-| `Vendor`              | Supplier master data scoped to a workspace                  |
-| `PurchaseRequest`     | Request header with status, priority, category, and totals  |
-| `PurchaseRequestItem` | Request line items with quantity, unit, and money           |
-| `Approval`            | Workflow container linked one-to-one with a request         |
-| `ApprovalStep`        | Ordered approver steps with decision notes                  |
-| `Quotation`           | Vendor quote for a request                                  |
-| `QuotationItem`       | Quote lines linked to request items                         |
-| `PurchaseOrder`       | Issued order with vendor, optional quote, and totals        |
-| `PurchaseOrderItem`   | Order lines with received quantity                          |
-| `Delivery`            | Shipment against a purchase order                           |
-| `AuditLog`            | Append-only workspace activity record                       |
+| Model                 | Purpose                                                                          |
+| --------------------- | -------------------------------------------------------------------------------- |
+| `User`                | Account identity and bcrypt password hash                                        |
+| `Workspace`           | Tenant boundary and base currency                                                |
+| `WorkspaceMember`     | User-to-workspace role and active/suspended status                               |
+| `WorkspaceInvitation` | One-time hashed invitation with expiry and lifecycle status                      |
+| `Vendor`              | Supplier master data scoped to a workspace                                       |
+| `PurchaseRequest`     | Request header with status, priority, category, notes, totals, and soft deletion |
+| `PurchaseRequestItem` | Request line items with quantity, unit, money, category, and notes               |
+| `Approval`            | Workflow container linked one-to-one with a request                              |
+| `ApprovalStep`        | Ordered approver steps with decision notes                                       |
+| `Quotation`           | Vendor quote for a request                                                       |
+| `QuotationItem`       | Quote lines linked to request items                                              |
+| `PurchaseOrder`       | Issued order with vendor, optional quote, and totals                             |
+| `PurchaseOrderItem`   | Order lines with received quantity                                               |
+| `Delivery`            | Shipment against a purchase order                                                |
+| `AuditLog`            | Append-only workspace activity record                                            |
 
 Money uses `Decimal(14,2)`; quantities use `Decimal(12,2)`. Tables and columns use snake_case
 mappings, and all business records carry `workspaceId` indexes for tenant-scoped queries.
@@ -419,6 +491,12 @@ Coverage includes:
   concurrent last-owner demotion/suspension.
 - Suspension, reactivation, removal, suspended-session behaviour, and audit event contents.
 - Member pagination, search, role/status filters, and validation errors.
+- Purchase request creation, strict validation, Decimal totals, request-number sequencing under
+  concurrency, list filters, detail and activity history, draft edits, soft deletion, submission,
+  duplicate submission, submitted-request locks, rollback, ownership, role permissions,
+  cross-workspace isolation, and audit metadata.
+- Frontend request list, search/filter/pagination, create form with dynamic line items and live
+  totals, edit, detail, submit/delete confirmations, viewer read-only mode, and error states.
 - Frontend role-aware navigation, restricted routes, Settings team management, invitation
   acceptance, suspended access, API errors, and existing authentication flows.
 
@@ -435,16 +513,21 @@ Coverage includes:
   metadata. Copying a pending invitation rotates its token.
 - Membership and invitation mutations run in transactions, and workspace row locks serialize
   last-owner checks under concurrent requests.
+- Purchase request totals are always recomputed server-side with Prisma `Decimal`; strict schemas
+  reject client-supplied totals, unknown fields, and imprecise values.
+- Request reads and writes are scoped by workspace and ownership, and request-row locks guard
+  edit, delete, and submit races. Request deletion is soft; its audit record remains append-only.
 - Unexpected errors return a generic `500` envelope without stacks or internal messages.
 - Audit logs have no update or delete API and remain append-only.
 
 ## Phase boundaries
 
-Phase 3 delivers workspace-scoped RBAC, member and invitation administration, permission-aware UI,
-and audit logging. Procurement workflow execution — request intake and state transitions, approval
-decisions, vendor management, sourcing, purchase orders, and delivery receiving — remains Phase 4
-work. The module pages continue to present polished placeholders so navigation stays complete
-without pretending those workflows are implemented.
+Phase 4 delivers purchase request intake: creation, listing, detail, editing, soft deletion, and
+submission with workspace-scoped authorization and audit logging. Approval decisions, approver
+assignment and routing, vendor management, sourcing, purchase orders, and delivery receiving remain
+Phase 5 work. Submitted requests are ready for the Phase 5 approval workflow; the other module pages
+continue to present polished placeholders so navigation stays complete without pretending those
+workflows are implemented.
 
 ## License
 
