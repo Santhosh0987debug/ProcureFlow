@@ -17,6 +17,10 @@ const PurchaseRequestsPage = lazy(() => import('./pages/PurchaseRequestsPage'));
 const PurchaseRequestCreatePage = lazy(() => import('./pages/PurchaseRequestCreatePage'));
 const PurchaseRequestDetailPage = lazy(() => import('./pages/PurchaseRequestDetailPage'));
 const PurchaseRequestEditPage = lazy(() => import('./pages/PurchaseRequestEditPage'));
+const ApprovalsPage = lazy(() => import('./pages/ApprovalsPage'));
+const ApprovalDetailPage = lazy(() => import('./pages/ApprovalDetailPage'));
+const ApprovalWorkflowsPage = lazy(() => import('./pages/ApprovalWorkflowsPage'));
+const ApprovalWorkflowEditorPage = lazy(() => import('./pages/ApprovalWorkflowEditorPage'));
 
 export function App() {
   return (
@@ -68,7 +72,15 @@ export function App() {
               path="approvals"
               element={
                 <PermissionGate anyOf={[Permission.ApprovalsRead]}>
-                  <ModulePage moduleKey="approvals" />
+                  <ApprovalsPage />
+                </PermissionGate>
+              }
+            />
+            <Route
+              path="approvals/:approvalId"
+              element={
+                <PermissionGate anyOf={[Permission.ApprovalsRead]}>
+                  <ApprovalDetailPage />
                 </PermissionGate>
               }
             />
@@ -117,6 +129,30 @@ export function App() {
               element={
                 <PermissionGate anyOf={[Permission.AuditLogsRead]}>
                   <ModulePage moduleKey="auditLogs" />
+                </PermissionGate>
+              }
+            />
+            <Route
+              path="settings/approval-workflows"
+              element={
+                <PermissionGate anyOf={[Permission.ApprovalWorkflowsRead]}>
+                  <ApprovalWorkflowsPage />
+                </PermissionGate>
+              }
+            />
+            <Route
+              path="settings/approval-workflows/new"
+              element={
+                <PermissionGate anyOf={[Permission.ApprovalWorkflowsManage]}>
+                  <ApprovalWorkflowEditorPage />
+                </PermissionGate>
+              }
+            />
+            <Route
+              path="settings/approval-workflows/:workflowId/edit"
+              element={
+                <PermissionGate anyOf={[Permission.ApprovalWorkflowsManage]}>
+                  <ApprovalWorkflowEditorPage />
                 </PermissionGate>
               }
             />

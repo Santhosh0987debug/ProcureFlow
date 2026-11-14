@@ -18,6 +18,8 @@ import {
 import { authenticate } from '../middleware/authenticate.js';
 import { authorizeWorkspace } from '../middleware/authorize.js';
 import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
+import { approvalRouter } from './approval.routes.js';
+import { approvalWorkflowRouter } from './approval-workflow.routes.js';
 import { purchaseRequestRouter } from './purchase-request.routes.js';
 import {
   changeMemberRoleSchema,
@@ -34,6 +36,8 @@ export const workspaceRouter = Router();
 workspaceRouter.use(authenticate);
 
 workspaceRouter.use('/:workspaceId/purchase-requests', purchaseRequestRouter);
+workspaceRouter.use('/:workspaceId/approval-workflows', approvalWorkflowRouter);
+workspaceRouter.use('/:workspaceId/approvals', approvalRouter);
 
 workspaceRouter.get(
   '/:workspaceId/members',

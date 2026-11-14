@@ -1,4 +1,5 @@
 import type { ApiSuccessResponse } from './api.js';
+import type { ApprovalCycleSummary } from './approvals.js';
 import type { PaginatedResult } from './members.js';
 import type { Currency, Priority, ProcurementCategory, RequestStatus } from './procurement.js';
 
@@ -95,12 +96,15 @@ export interface PurchaseRequestDetail extends PurchaseRequestListSummary {
   items: PurchaseRequestItemRecord[];
   activity: PurchaseRequestActivityEntry[];
   actions: PurchaseRequestActions;
+  approval: ApprovalCycleSummary | null;
+  approvalHistory: ApprovalCycleSummary[];
 }
 
 export interface PurchaseRequestMetrics {
   total: number;
   draft: number;
   pendingApproval: number;
+  changesRequested: number;
   approved: number;
   totalValue: string;
 }

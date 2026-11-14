@@ -32,16 +32,40 @@ enum Priority {
 
 enum RequestStatus {
   draft
+  submitted
   pending_approval
+  changes_requested
   approved
   rejected
   cancelled
 }
 
-enum ApprovalDecision {
+enum ApprovalCycleStatus {
   pending
   approved
   rejected
+  changes_requested
+  cancelled
+}
+
+enum ApprovalStepStatus {
+  pending
+  approved
+  rejected
+  changes_requested
+  cancelled
+  skipped
+}
+
+/// Parallel levels can require every assignee to approve or only one.
+enum ApprovalLevelRule {
+  all_required
+  any_one
+}
+
+enum ApproverAssignmentType {
+  member
+  role
 }
 
 enum PurchaseOrderStatus {
@@ -126,6 +150,10 @@ model User {
   requestedPurchaseRequests PurchaseRequest[]     @relation("PurchaseRequestRequester")
   deletedPurchaseRequests   PurchaseRequest[]     @relation("PurchaseRequestDeleter")
   approvalSteps             ApprovalStep[]        @relation("ApprovalStepApprover")
+  decidedApprovalSteps      ApprovalStep[]        @relation("ApprovalStepDecider")
+  requestedApprovals        Approval[]           @relation("ApprovalRequester")
+  createdApprovalWorkflows  ApprovalWorkflow[]    @relation("ApprovalWorkflowCreator")
+  updatedApprovalWorkflows  ApprovalWorkflow[]    @relation("ApprovalWorkflowUpdater")
   createdPurchaseOrders     PurchaseOrder[]       @relation("PurchaseOrderCreator")
   receivedDeliveries        Delivery[]            @relation("DeliveryReceiver")
   sentInvitations           WorkspaceInvitation[] @relation("InvitationSender")
@@ -146,11 +174,12 @@ model Workspace {
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   createdBy        User                  @relation("WorkspaceCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  members          WorkspaceMember[]
-  invitations      WorkspaceInvitation[]
-  vendors          Vendor[]
-  purchaseRequests PurchaseRequest[]
-  approvals        Approval[]
+  members           WorkspaceMember[]
+  invitations       WorkspaceInvitation[]
+  vendors           Vendor[]
+  purchaseRequests  PurchaseRequest[]
+  approvals         Approval[]
+  approvalWorkflows ApprovalWorkflow[]
   quotations       Quotation[]
   purchaseOrders   PurchaseOrder[]
   deliveries       Delivery[]
@@ -172,9 +201,10 @@ model WorkspaceMember {
   createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  suspendedBy User?     @relation("MembershipSuspender", fields: [suspendedById], references: [id], onDelete: SetNull)
+  workspace         Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user              User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  suspendedBy       User?                      @relation("MembershipSuspender", fields: [suspendedById], references: [id], onDelete: SetNull)
+  workflowApprovers ApprovalWorkflowApprover[]
 
   @@unique([workspaceId, userId])
   @@index([userId])
@@ -274,7 +304,7 @@ model PurchaseRequest {
   requestedBy    User                  @relation("PurchaseRequestRequester", fields: [requestedById], references: [id], onDelete: Restrict)
   deletedBy      User?                 @relation("PurchaseRequestDeleter", fields: [deletedById], references: [id], onDelete: SetNull)
   items          PurchaseRequestItem[]
-  approval       Approval?
+  approvals      Approval[]
   quotations     Quotation[]
   purchaseOrders PurchaseOrder[]
 
@@ -308,42 +338,132 @@ model PurchaseRequestItem {
   @@map("purchase_request_items")
 }
 
+/// Reusable workflow configuration. Editing a workflow never rewrites an
+/// existing approval cycle; cycles copy the configuration they were created
+/// with into their own rows.
+model ApprovalWorkflow {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  name        String   @db.VarChar(120)
+  description String?  @db.Text
+  isActive    Boolean  @default(false) @map("is_active")
+  isDefault   Boolean  @default(false) @map("is_default")
+  currency    Currency @default(USD)
+  minAmount   Decimal? @map("min_amount") @db.Decimal(14, 2)
+  maxAmount   Decimal? @map("max_amount") @db.Decimal(14, 2)
+  createdById String   @map("created_by_id") @db.Uuid
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  workspace Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User                    @relation("ApprovalWorkflowCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy User?                   @relation("ApprovalWorkflowUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  levels    ApprovalWorkflowLevel[]
+  approvals Approval[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, isActive, isDefault])
+  @@index([workspaceId, currency, minAmount, maxAmount])
+  @@index([createdById])
+  @@index([updatedById])
+  @@map("approval_workflows")
+}
+
+model ApprovalWorkflowLevel {
+  id             String             @id @default(uuid()) @db.Uuid
+  workflowId     String             @map("workflow_id") @db.Uuid
+  levelOrder     Int                @map("level_order")
+  name           String             @db.VarChar(140)
+  completionRule ApprovalLevelRule  @default(all_required) @map("completion_rule")
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  workflow  ApprovalWorkflow            @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  approvers ApprovalWorkflowApprover[]
+
+  @@unique([workflowId, levelOrder])
+  @@map("approval_workflow_levels")
+}
+
+model ApprovalWorkflowApprover {
+  id             String                 @id @default(uuid()) @db.Uuid
+  levelId        String                 @map("level_id") @db.Uuid
+  assignmentType ApproverAssignmentType @map("assignment_type")
+  memberId       String?                @map("member_id") @db.Uuid
+  role           WorkspaceRole?
+  createdAt      DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  level  ApprovalWorkflowLevel @relation(fields: [levelId], references: [id], onDelete: Cascade)
+  member WorkspaceMember?      @relation(fields: [memberId], references: [id], onDelete: SetNull)
+
+  @@index([levelId])
+  @@index([memberId])
+  @@map("approval_workflow_approvers")
+}
+
+/// One approval cycle per submission/resubmission. Historical cycles remain
+/// intact when a request is resubmitted after changes are requested.
 model Approval {
-  id                String           @id @default(uuid()) @db.Uuid
-  workspaceId       String           @map("workspace_id") @db.Uuid
-  purchaseRequestId String           @unique @map("purchase_request_id") @db.Uuid
-  status            ApprovalDecision @default(pending)
-  currentStep       Int              @default(1) @map("current_step")
-  requestedAt       DateTime         @default(now()) @map("requested_at") @db.Timestamptz(3)
-  completedAt       DateTime?        @map("completed_at") @db.Timestamptz(3)
-  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt         DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                  String              @id @default(uuid()) @db.Uuid
+  workspaceId         String              @map("workspace_id") @db.Uuid
+  purchaseRequestId   String              @map("purchase_request_id") @db.Uuid
+  workflowId          String?             @map("workflow_id") @db.Uuid
+  workflowName        String?             @map("workflow_name") @db.VarChar(120)
+  workflowDescription String?             @map("workflow_description") @db.Text
+  cycleNumber         Int                 @default(1) @map("cycle_number")
+  status              ApprovalCycleStatus @default(pending)
+  currentLevel        Int                 @default(1) @map("current_level")
+  levelCount          Int                 @default(1) @map("level_count")
+  requestedById       String?             @map("requested_by_id") @db.Uuid
+  requestedAt         DateTime            @default(now()) @map("requested_at") @db.Timestamptz(3)
+  completedAt         DateTime?           @map("completed_at") @db.Timestamptz(3)
+  expiresAt           DateTime?           @map("expires_at") @db.Timestamptz(3)
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  workflow        ApprovalWorkflow? @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  requestedBy     User?            @relation("ApprovalRequester", fields: [requestedById], references: [id], onDelete: SetNull)
   steps           ApprovalStep[]
 
-  @@index([workspaceId, status])
+  @@unique([purchaseRequestId, cycleNumber])
+  @@index([workspaceId, status, requestedAt])
+  @@index([purchaseRequestId, status])
+  @@index([requestedById])
   @@map("approvals")
 }
 
+/// Step rows are the immutable decision record for a cycle. `isActive` marks
+/// the current sequential level; only active, pending steps can be decided.
 model ApprovalStep {
-  id           String           @id @default(uuid()) @db.Uuid
-  approvalId   String           @map("approval_id") @db.Uuid
-  stepOrder    Int              @map("step_order")
-  name         String           @db.VarChar(140)
-  approverId   String?          @map("approver_id") @db.Uuid
-  status       ApprovalDecision @default(pending)
-  decisionNote String?          @map("decision_note") @db.Text
-  decidedAt    DateTime?        @map("decided_at") @db.Timestamptz(3)
-  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id             String                 @id @default(uuid()) @db.Uuid
+  approvalId     String                 @map("approval_id") @db.Uuid
+  levelOrder     Int                    @map("level_order")
+  stepOrder      Int                    @map("step_order")
+  name           String                 @db.VarChar(140)
+  levelRule      ApprovalLevelRule      @map("level_rule")
+  assignmentType ApproverAssignmentType @map("assignment_type")
+  assignedRole   WorkspaceRole?         @map("assigned_role")
+  approverId     String?                @map("approver_id") @db.Uuid
+  decidedById    String?                @map("decided_by_id") @db.Uuid
+  status         ApprovalStepStatus     @default(pending)
+  isActive       Boolean                @default(false) @map("is_active")
+  decisionNote   String?                @map("decision_note") @db.Text
+  decidedAt      DateTime?              @map("decided_at") @db.Timestamptz(3)
+  cancelledAt    DateTime?              @map("cancelled_at") @db.Timestamptz(3)
+  createdAt      DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  approval Approval @relation(fields: [approvalId], references: [id], onDelete: Cascade)
-  approver User?    @relation("ApprovalStepApprover", fields: [approverId], references: [id], onDelete: SetNull)
+  approval  Approval @relation(fields: [approvalId], references: [id], onDelete: Cascade)
+  approver  User?    @relation("ApprovalStepApprover", fields: [approverId], references: [id], onDelete: SetNull)
+  decidedBy User?    @relation("ApprovalStepDecider", fields: [decidedById], references: [id], onDelete: SetNull)
 
   @@unique([approvalId, stepOrder])
   @@index([approverId, status])
+  @@index([approvalId, levelOrder, isActive])
+  @@index([decidedById])
   @@map("approval_steps")
 }
 

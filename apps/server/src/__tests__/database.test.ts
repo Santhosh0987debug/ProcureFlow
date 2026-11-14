@@ -70,23 +70,32 @@ async function createProcurementChain() {
     data: {
       workspaceId: workspace.id,
       purchaseRequestId: request.id,
+      requestedById: owner.id,
       status: 'pending',
-      currentStep: 2,
+      currentLevel: 2,
+      levelCount: 2,
       steps: {
         create: [
           {
+            levelOrder: 1,
             stepOrder: 1,
             name: 'Manager review',
+            levelRule: 'all_required',
+            assignmentType: 'member',
             approverId: approver.id,
             status: 'approved',
             decisionNote: 'Within the team plan.',
             decidedAt: new Date(),
           },
           {
+            levelOrder: 2,
             stepOrder: 2,
             name: 'Finance review',
+            levelRule: 'all_required',
+            assignmentType: 'member',
             approverId: approver.id,
             status: 'pending',
+            isActive: true,
           },
         ],
       },
@@ -205,7 +214,7 @@ describe('procurement database relationships', () => {
       where: { id: chain.request.id },
       include: {
         items: true,
-        approval: { include: { steps: true } },
+        approvals: { include: { steps: true } },
         quotations: { include: { items: true } },
         purchaseOrders: {
           include: {
@@ -218,9 +227,10 @@ describe('procurement database relationships', () => {
     });
 
     expect(loadedRequest?.items).toHaveLength(2);
-    expect(loadedRequest?.approval?.steps).toHaveLength(2);
-    expect(loadedRequest?.approval?.status).toBe('pending');
-    expect(loadedRequest?.approval?.currentStep).toBe(2);
+    expect(loadedRequest?.approvals).toHaveLength(1);
+    expect(loadedRequest?.approvals[0]?.steps).toHaveLength(2);
+    expect(loadedRequest?.approvals[0]?.status).toBe('pending');
+    expect(loadedRequest?.approvals[0]?.currentLevel).toBe(2);
     expect(loadedRequest?.quotations).toHaveLength(1);
     expect(loadedRequest?.quotations[0]?.items).toHaveLength(2);
     expect(loadedRequest?.purchaseOrders).toHaveLength(1);

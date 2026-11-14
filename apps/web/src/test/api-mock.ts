@@ -1,4 +1,8 @@
 import {
+  ApprovalCycleStatus,
+  ApprovalLevelRule,
+  ApprovalStepStatus,
+  ApproverAssignmentType,
   Currency,
   InvitationStatus,
   MembershipStatus,
@@ -8,9 +12,24 @@ import {
   RequestStatus,
   WorkspaceRole,
   permissionsForRole,
+  roleHasPermission,
 } from '@procureflow/shared';
 import type {
   AcceptInvitationResult,
+  ApprovalCycleSummary,
+  ApprovalDetail,
+  ApprovalInboxItem,
+  ApprovalInboxResult,
+  ApprovalLevelRecord,
+  ApprovalPersonSummary,
+  ApprovalStepRecord,
+  ApprovalWorkflowDetail,
+  ApprovalWorkflowLevelRecord,
+  ApprovalWorkflowListResult,
+  ApprovalWorkflowMemberRecord,
+  ApprovalWorkflowPreview,
+  ApprovalWorkflowSummary,
+  ApprovalWorkflowWriteRequest,
   AuthSession,
   AuthWorkspace,
   CreateInvitationResult,
@@ -177,6 +196,274 @@ const testRequester = {
   jobTitle: 'Facilities Coordinator',
 };
 
+const testOwner: ApprovalPersonSummary = {
+  id: TEST_USER_ID,
+  firstName: 'Amara',
+  lastName: 'Okafor',
+  email: 'amara.okafor@northwind.example',
+  jobTitle: 'Head of Procurement',
+};
+
+const testApprover: ApprovalPersonSummary = {
+  id: 'user-approver',
+  firstName: 'Priya',
+  lastName: 'Nair',
+  email: 'priya.nair@northwind.example',
+  jobTitle: 'Finance Business Partner',
+};
+
+function approvalStep(
+  id: string,
+  levelOrder: number,
+  stepOrder: number,
+  name: string,
+  approver: ApprovalPersonSummary,
+  isActive: boolean,
+): ApprovalStepRecord {
+  return {
+    id,
+    levelOrder,
+    stepOrder,
+    name,
+    assignmentType: ApproverAssignmentType.Member,
+    assignedRole: null,
+    approver,
+    status: ApprovalStepStatus.Pending,
+    decisionNote: null,
+    decidedAt: null,
+    decidedBy: null,
+    isActive,
+    createdAt: '2026-11-09T12:00:00.000Z',
+  };
+}
+
+function pendingApprovalLevels(): ApprovalLevelRecord[] {
+  return [
+    {
+      levelOrder: 1,
+      name: 'Manager review',
+      completionRule: ApprovalLevelRule.AllRequired,
+      status: ApprovalStepStatus.Pending,
+      steps: [approvalStep('step-pending-manager', 1, 1, 'Manager review', testOwner, true)],
+    },
+    {
+      levelOrder: 2,
+      name: 'Finance review',
+      completionRule: ApprovalLevelRule.AllRequired,
+      status: ApprovalStepStatus.Pending,
+      steps: [approvalStep('step-pending-finance', 2, 1, 'Finance review', testApprover, false)],
+    },
+  ];
+}
+
+function pendingApprovalSummary(): ApprovalCycleSummary {
+  return {
+    id: 'approval-pending-1',
+    cycleNumber: 1,
+    status: ApprovalCycleStatus.Pending,
+    workflowName: 'Standard procurement approval',
+    workflowDescription: 'Sequential manager and finance review for standard purchases.',
+    currentLevel: 1,
+    levelCount: 2,
+    requestedAt: '2026-11-09T12:00:00.000Z',
+    completedAt: null,
+    requestedBy: testRequester,
+    levels: pendingApprovalLevels(),
+  };
+}
+
+export function createTestApprovals(): ApprovalDetail[] {
+  const request = createTestPurchaseRequests().find(
+    (candidate) => candidate.id === 'request-pending-1',
+  );
+
+  if (!request) {
+    return [];
+  }
+
+  const summary = pendingApprovalSummary();
+  const approvalRequest: PurchaseRequestDetail = {
+    ...request,
+    approval: summary,
+    approvalHistory: [summary],
+  };
+
+  return [
+    {
+      ...summary,
+      request: approvalRequest,
+      actions: {
+        canApprove: true,
+        canReject: true,
+        canRequestChanges: true,
+        assignedStepId: 'step-pending-manager',
+        blockedReason: null,
+      },
+      history: [summary],
+    },
+  ];
+}
+
+function workflowMember(member: WorkspaceMemberSummary): ApprovalWorkflowMemberRecord {
+  return {
+    id: member.id,
+    userId: member.userId,
+    firstName: member.firstName,
+    lastName: member.lastName,
+    email: member.email,
+    jobTitle: member.jobTitle,
+    role: member.role,
+    status: member.status === MembershipStatus.Suspended ? 'suspended' : 'active',
+  };
+}
+
+function workflowPerson(member: WorkspaceMemberSummary): ApprovalPersonSummary {
+  return {
+    id: member.userId,
+    firstName: member.firstName,
+    lastName: member.lastName,
+    email: member.email,
+    jobTitle: member.jobTitle,
+  };
+}
+
+function memberWorkflowApprover(
+  id: string,
+  member: WorkspaceMemberSummary,
+): ApprovalWorkflowLevelRecord['approvers'][number] {
+  return {
+    id,
+    assignmentType: ApproverAssignmentType.Member,
+    role: null,
+    member: workflowMember(member),
+  };
+}
+
+function roleWorkflowApprover(
+  id: string,
+  role: WorkspaceRole,
+): ApprovalWorkflowLevelRecord['approvers'][number] {
+  return {
+    id,
+    assignmentType: ApproverAssignmentType.Role,
+    role,
+    member: null,
+  };
+}
+
+function workflowLevel(
+  id: string,
+  levelOrder: number,
+  name: string,
+  completionRule: ApprovalLevelRule,
+  approvers: ApprovalWorkflowLevelRecord['approvers'],
+): ApprovalWorkflowLevelRecord {
+  return { id, levelOrder, name, completionRule, approvers };
+}
+
+function workflowSummary(workflow: ApprovalWorkflowDetail): ApprovalWorkflowSummary {
+  const { levels: _levels, ...summary } = workflow;
+  return summary;
+}
+
+export function createTestApprovalWorkflows(): ApprovalWorkflowDetail[] {
+  const members = createTestMembers();
+  const owner = members[0] as WorkspaceMemberSummary;
+  const admin = members[1] as WorkspaceMemberSummary;
+  const manager = members[2] as WorkspaceMemberSummary;
+  const approver = members[3] as WorkspaceMemberSummary;
+  const createdBy = workflowPerson(owner);
+
+  return [
+    {
+      id: 'workflow-standard',
+      name: 'Standard procurement approval',
+      description: 'Sequential manager and finance review for standard purchases.',
+      isActive: true,
+      isDefault: true,
+      currency: Currency.USD,
+      minAmount: null,
+      maxAmount: '25000.00',
+      levelCount: 2,
+      approverCount: 2,
+      createdBy,
+      createdAt: '2026-10-01T09:00:00.000Z',
+      updatedAt: '2026-11-01T09:00:00.000Z',
+      levels: [
+        workflowLevel(
+          'workflow-standard-level-1',
+          1,
+          'Manager review',
+          ApprovalLevelRule.AllRequired,
+          [memberWorkflowApprover('workflow-standard-approver-1', manager)],
+        ),
+        workflowLevel(
+          'workflow-standard-level-2',
+          2,
+          'Finance review',
+          ApprovalLevelRule.AllRequired,
+          [memberWorkflowApprover('workflow-standard-approver-2', approver)],
+        ),
+      ],
+    },
+    {
+      id: 'workflow-capital',
+      name: 'Capital expenditure approval',
+      description: 'Finance and executive review for capital purchases above $25,000.',
+      isActive: true,
+      isDefault: false,
+      currency: Currency.USD,
+      minAmount: '25000.01',
+      maxAmount: null,
+      levelCount: 2,
+      approverCount: 2,
+      createdBy,
+      createdAt: '2026-10-05T09:00:00.000Z',
+      updatedAt: '2026-11-02T09:00:00.000Z',
+      levels: [
+        workflowLevel(
+          'workflow-capital-level-1',
+          1,
+          'Finance review',
+          ApprovalLevelRule.AllRequired,
+          [roleWorkflowApprover('workflow-capital-approver-1', WorkspaceRole.Approver)],
+        ),
+        workflowLevel(
+          'workflow-capital-level-2',
+          2,
+          'Executive approval',
+          ApprovalLevelRule.AnyOne,
+          [memberWorkflowApprover('workflow-capital-approver-2', admin)],
+        ),
+      ],
+    },
+    {
+      id: 'workflow-fast-track',
+      name: 'Low-value fast track',
+      description: 'Single-step approval for low-value purchases. Currently inactive.',
+      isActive: false,
+      isDefault: false,
+      currency: Currency.USD,
+      minAmount: null,
+      maxAmount: '1000.00',
+      levelCount: 1,
+      approverCount: 1,
+      createdBy,
+      createdAt: '2026-10-10T09:00:00.000Z',
+      updatedAt: '2026-10-10T09:00:00.000Z',
+      levels: [
+        workflowLevel(
+          'workflow-fast-track-level-1',
+          1,
+          'Manager review',
+          ApprovalLevelRule.AnyOne,
+          [memberWorkflowApprover('workflow-fast-track-approver-1', manager)],
+        ),
+      ],
+    },
+  ];
+}
+
 function item(
   id: string,
   description: string,
@@ -244,6 +531,8 @@ export function createTestPurchaseRequests(): PurchaseRequestDetail[] {
           occurredAt: '2026-11-10T09:00:00.000Z',
         },
       ],
+      approval: null,
+      approvalHistory: [],
       actions: { canEdit: true, canDelete: true, canSubmit: true },
     },
     {
@@ -299,6 +588,8 @@ export function createTestPurchaseRequests(): PurchaseRequestDetail[] {
           occurredAt: '2026-11-09T12:00:00.000Z',
         },
       ],
+      approval: pendingApprovalSummary(),
+      approvalHistory: [pendingApprovalSummary()],
       actions: { canEdit: false, canDelete: false, canSubmit: false },
     },
   ];
@@ -313,6 +604,9 @@ function summaryFor(requests: PurchaseRequestDetail[]): PurchaseRequestListResul
     pendingApproval: requests.filter((request) => request.status === RequestStatus.PendingApproval)
       .length,
     approved: requests.filter((request) => request.status === RequestStatus.Approved).length,
+    changesRequested: requests.filter(
+      (request) => request.status === RequestStatus.ChangesRequested,
+    ).length,
     totalValue: totalValue.toFixed(2),
   };
 }
@@ -325,6 +619,8 @@ function toListSummary(request: PurchaseRequestDetail) {
     items: _items,
     activity: _activity,
     actions: _actions,
+    approval: _approval,
+    approvalHistory: _approvalHistory,
     ...summary
   } = request;
 
@@ -336,12 +632,12 @@ function roundMoney(value: number): number {
 }
 
 function actionsFor(status: RequestStatus, permissions: readonly Permission[]) {
-  const isDraft = status === RequestStatus.Draft;
+  const isEditable = status === RequestStatus.Draft || status === RequestStatus.ChangesRequested;
 
   return {
-    canEdit: isDraft && permissions.includes(Permission.RequestsUpdate),
-    canDelete: isDraft && permissions.includes(Permission.RequestsDelete),
-    canSubmit: isDraft && permissions.includes(Permission.RequestsSubmit),
+    canEdit: isEditable && permissions.includes(Permission.RequestsUpdate),
+    canDelete: status === RequestStatus.Draft && permissions.includes(Permission.RequestsDelete),
+    canSubmit: isEditable && permissions.includes(Permission.RequestsSubmit),
   };
 }
 
@@ -390,6 +686,8 @@ interface FetchMockOptions {
   purchaseRequests?: PurchaseRequestDetail[];
   purchaseRequestsResponse?: { status: number; body: unknown };
   purchaseRequestDetailResponse?: { status: number; body: unknown };
+  approvals?: ApprovalDetail[];
+  workflows?: ApprovalWorkflowDetail[];
 }
 
 function parseUrl(input: RequestInfo | URL): URL {
@@ -419,6 +717,386 @@ function updatedMember(
   return { ...member, ...changes };
 }
 
+function inboxItemsFor(approvals: readonly ApprovalDetail[], userId: string): ApprovalInboxItem[] {
+  return approvals.flatMap((approval) =>
+    approval.levels.flatMap((level) =>
+      level.steps
+        .filter((step) => step.approver?.id === userId)
+        .map((step) => ({
+          approvalId: approval.id,
+          cycleNumber: approval.cycleNumber,
+          approvalStatus: approval.status,
+          requestId: approval.request.id,
+          requestNumber: approval.request.requestNumber,
+          title: approval.request.title,
+          requester: approval.request.requester,
+          department: approval.request.department,
+          amount: approval.request.totalAmount,
+          currency: approval.request.currency,
+          priority: approval.request.priority,
+          submittedAt: approval.request.submittedAt ?? approval.requestedAt,
+          levelOrder: level.levelOrder,
+          levelName: level.name,
+          levelCount: approval.levelCount,
+          completionRule: level.completionRule,
+          stepStatus: step.status,
+          assignedAt: step.createdAt,
+          isActive: step.isActive,
+        })),
+    ),
+  );
+}
+
+function inboxSummaryFor(items: readonly ApprovalInboxItem[]): ApprovalInboxResult['summary'] {
+  const count = (status: ApprovalStepStatus): number =>
+    items.filter((item) => item.stepStatus === status).length;
+
+  return {
+    pending: count(ApprovalStepStatus.Pending),
+    approved: count(ApprovalStepStatus.Approved),
+    rejected: count(ApprovalStepStatus.Rejected),
+    changesRequested: count(ApprovalStepStatus.ChangesRequested),
+  };
+}
+
+function previewWorkflow(
+  input: ApprovalWorkflowWriteRequest,
+  members: readonly WorkspaceMemberSummary[],
+): ApprovalWorkflowPreview {
+  const warnings: string[] = [];
+  const levels = input.levels.map((level, index) => {
+    const resolved = new Map<string, ApprovalPersonSummary>();
+    const levelWarnings: string[] = [];
+
+    for (const approver of level.approvers) {
+      if (approver.assignmentType === ApproverAssignmentType.Member) {
+        const member = members.find((candidate) => candidate.id === approver.memberId);
+
+        if (!member) {
+          levelWarnings.push('An assigned member is no longer part of the workspace.');
+          continue;
+        }
+
+        if (member.status !== MembershipStatus.Active) {
+          levelWarnings.push(
+            `${member.firstName} ${member.lastName} is suspended and cannot approve.`,
+          );
+          continue;
+        }
+
+        if (!roleHasPermission(member.role, Permission.ApprovalsDecide)) {
+          levelWarnings.push(
+            `${member.firstName} ${member.lastName} does not hold approval permission.`,
+          );
+          continue;
+        }
+
+        const person = workflowPerson(member);
+
+        if (resolved.has(person.id)) {
+          levelWarnings.push(`${person.firstName} ${person.lastName} appears twice in this level.`);
+          continue;
+        }
+
+        resolved.set(person.id, person);
+        continue;
+      }
+
+      const eligible = members.filter(
+        (member) =>
+          member.status === MembershipStatus.Active &&
+          member.role === approver.role &&
+          roleHasPermission(member.role, Permission.ApprovalsDecide),
+      );
+
+      if (eligible.length === 0) {
+        levelWarnings.push(
+          `No active members currently hold the ${approver.role.replaceAll('_', ' ')} role.`,
+        );
+      }
+
+      for (const member of eligible) {
+        const person = workflowPerson(member);
+
+        if (resolved.has(person.id)) {
+          levelWarnings.push(`${person.firstName} ${person.lastName} appears twice in this level.`);
+          continue;
+        }
+
+        resolved.set(person.id, person);
+      }
+    }
+
+    if (resolved.size === 0) {
+      levelWarnings.push('This level needs at least one eligible active approver.');
+    }
+
+    warnings.push(...levelWarnings);
+
+    return {
+      levelOrder: index + 1,
+      name: level.name,
+      completionRule: level.completionRule,
+      approvers: [...resolved.values()],
+      warnings: levelWarnings,
+    };
+  });
+
+  return {
+    name: input.name,
+    currency: input.currency,
+    minAmount: input.minAmount ?? null,
+    maxAmount: input.maxAmount ?? null,
+    isActive: false,
+    isDefault: input.isDefault,
+    levels,
+    warnings,
+    canActivate: levels.length > 0 && levels.every((level) => level.approvers.length > 0),
+  };
+}
+
+function levelsFromWrite(
+  workflowId: string,
+  input: ApprovalWorkflowWriteRequest,
+  members: readonly WorkspaceMemberSummary[],
+): ApprovalWorkflowLevelRecord[] {
+  return input.levels.map((level, index) => ({
+    id: `${workflowId}-level-${index + 1}`,
+    levelOrder: index + 1,
+    name: level.name,
+    completionRule: level.completionRule,
+    approvers: level.approvers.map((approver, approverIndex) => {
+      const id = `${workflowId}-approver-${index + 1}-${approverIndex + 1}`;
+
+      if (approver.assignmentType === ApproverAssignmentType.Member) {
+        const member = members.find((candidate) => candidate.id === approver.memberId);
+
+        return {
+          id,
+          assignmentType: ApproverAssignmentType.Member,
+          role: null,
+          member: member ? workflowMember(member) : null,
+        };
+      }
+
+      return {
+        id,
+        assignmentType: ApproverAssignmentType.Role,
+        role: approver.role,
+        member: null,
+      };
+    }),
+  }));
+}
+
+function workflowFromWrite(
+  workflowId: string,
+  input: ApprovalWorkflowWriteRequest,
+  members: readonly WorkspaceMemberSummary[],
+  createdBy: ApprovalPersonSummary,
+  createdAt: string,
+  isActive: boolean,
+): ApprovalWorkflowDetail {
+  const levels = levelsFromWrite(workflowId, input, members);
+
+  return {
+    id: workflowId,
+    name: input.name,
+    description: input.description ?? null,
+    isActive,
+    isDefault: input.isDefault,
+    currency: input.currency,
+    minAmount: input.minAmount ?? null,
+    maxAmount: input.maxAmount ?? null,
+    levelCount: levels.length,
+    approverCount: levels.reduce((count, level) => count + level.approvers.length, 0),
+    createdBy,
+    createdAt,
+    updatedAt: new Date().toISOString(),
+    levels,
+  };
+}
+
+function cycleSummaryOf(approval: ApprovalDetail): ApprovalCycleSummary {
+  const { request: _request, actions: _actions, history: _history, ...summary } = approval;
+  return summary;
+}
+
+function levelSatisfied(level: ApprovalLevelRecord): boolean {
+  const actionable = level.steps.filter(
+    (step) =>
+      step.status !== ApprovalStepStatus.Skipped && step.status !== ApprovalStepStatus.Cancelled,
+  );
+
+  if (level.completionRule === ApprovalLevelRule.AnyOne) {
+    return actionable.some((step) => step.status === ApprovalStepStatus.Approved);
+  }
+
+  return (
+    actionable.length > 0 && actionable.every((step) => step.status === ApprovalStepStatus.Approved)
+  );
+}
+
+function requestWithCycle(
+  request: PurchaseRequestDetail,
+  summary: ApprovalCycleSummary,
+  status: RequestStatus,
+  decidedAt: string | null,
+  permissions: readonly Permission[],
+): PurchaseRequestDetail {
+  return {
+    ...request,
+    status,
+    decidedAt,
+    approval: summary,
+    approvalHistory: [summary],
+    actions: actionsFor(status, permissions),
+  };
+}
+
+function applyDecision(
+  approval: ApprovalDetail,
+  kind: 'approve' | 'reject' | 'request-changes',
+  note: string | null,
+  actor: ApprovalPersonSummary,
+  permissions: readonly Permission[],
+): ApprovalDetail {
+  const levels = approval.levels.map((level) => ({
+    ...level,
+    steps: level.steps.map((step) => ({ ...step })),
+  }));
+  const activeStep = levels
+    .flatMap((level) => level.steps)
+    .find((step) => step.isActive && step.status === ApprovalStepStatus.Pending);
+
+  if (!activeStep) {
+    return approval;
+  }
+
+  const now = new Date().toISOString();
+  const currentLevel = levels.find((level) => level.levelOrder === activeStep.levelOrder);
+  activeStep.isActive = false;
+  activeStep.decidedAt = now;
+  activeStep.decidedBy = actor;
+  activeStep.decisionNote = note;
+
+  if (kind === 'reject' || kind === 'request-changes') {
+    const stepStatus =
+      kind === 'reject' ? ApprovalStepStatus.Rejected : ApprovalStepStatus.ChangesRequested;
+    const cycleStatus =
+      kind === 'reject' ? ApprovalCycleStatus.Rejected : ApprovalCycleStatus.ChangesRequested;
+    const requestStatus =
+      kind === 'reject' ? RequestStatus.Rejected : RequestStatus.ChangesRequested;
+
+    activeStep.status = stepStatus;
+
+    for (const level of levels) {
+      for (const step of level.steps) {
+        if (step.status === ApprovalStepStatus.Pending) {
+          step.status = ApprovalStepStatus.Cancelled;
+          step.isActive = false;
+        }
+      }
+    }
+
+    if (currentLevel) {
+      currentLevel.status = stepStatus;
+    }
+
+    const summary: ApprovalCycleSummary = {
+      ...cycleSummaryOf(approval),
+      status: cycleStatus,
+      completedAt: now,
+      levels,
+    };
+
+    return {
+      ...approval,
+      ...summary,
+      request: requestWithCycle(approval.request, summary, requestStatus, now, permissions),
+      actions: {
+        canApprove: false,
+        canReject: false,
+        canRequestChanges: false,
+        assignedStepId: null,
+        blockedReason: 'This approval cycle is no longer pending.',
+      },
+      history: [summary],
+    };
+  }
+
+  activeStep.status = ApprovalStepStatus.Approved;
+
+  if (currentLevel && levelSatisfied(currentLevel)) {
+    currentLevel.status = ApprovalStepStatus.Approved;
+
+    if (currentLevel.completionRule === ApprovalLevelRule.AnyOne) {
+      for (const step of currentLevel.steps) {
+        if (step.status === ApprovalStepStatus.Pending) {
+          step.status = ApprovalStepStatus.Skipped;
+          step.isActive = false;
+        }
+      }
+    }
+  }
+
+  const nextLevel = levels.find((level) => level.levelOrder === activeStep.levelOrder + 1);
+
+  if (currentLevel && levelSatisfied(currentLevel) && nextLevel) {
+    for (const step of nextLevel.steps) {
+      if (step.status === ApprovalStepStatus.Pending) {
+        step.isActive = true;
+      }
+    }
+
+    const summary: ApprovalCycleSummary = {
+      ...cycleSummaryOf(approval),
+      currentLevel: nextLevel.levelOrder,
+      levels,
+    };
+
+    return {
+      ...approval,
+      ...summary,
+      request: {
+        ...approval.request,
+        approval: summary,
+        approvalHistory: [summary],
+      },
+      actions: {
+        canApprove: false,
+        canReject: false,
+        canRequestChanges: false,
+        assignedStepId: null,
+        blockedReason: 'Your decision was recorded. This approval is now with another approver.',
+      },
+      history: [summary],
+    };
+  }
+
+  const summary: ApprovalCycleSummary = {
+    ...cycleSummaryOf(approval),
+    status: ApprovalCycleStatus.Approved,
+    currentLevel: approval.levelCount,
+    completedAt: now,
+    levels,
+  };
+
+  return {
+    ...approval,
+    ...summary,
+    request: requestWithCycle(approval.request, summary, RequestStatus.Approved, now, permissions),
+    actions: {
+      canApprove: false,
+      canReject: false,
+      canRequestChanges: false,
+      assignedStepId: null,
+      blockedReason: 'This approval cycle is complete.',
+    },
+    history: [summary],
+  };
+}
+
 export function createFetchMock(options: FetchMockOptions = {}) {
   const { authenticated = true, session = testSession } = options;
   const members = [...(options.members ?? createTestMembers())];
@@ -430,6 +1108,9 @@ export function createFetchMock(options: FetchMockOptions = {}) {
       actions: actionsFor(request.status, permissions),
     }),
   );
+  const approvals = [...(options.approvals ?? createTestApprovals())];
+  const workflows = [...(options.workflows ?? createTestApprovalWorkflows())];
+  let workflowSequence = workflows.length;
 
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = parseUrl(input);
@@ -601,6 +1282,8 @@ export function createFetchMock(options: FetchMockOptions = {}) {
               occurredAt: now,
             },
           ],
+          approval: null,
+          approvalHistory: [],
           actions: actionsFor(RequestStatus.Draft, permissions),
         };
 
@@ -748,6 +1431,318 @@ export function createFetchMock(options: FetchMockOptions = {}) {
             json: async () => null,
           };
         }
+      }
+    }
+
+    const requestApprovalMatch = path.match(
+      /^\/api\/workspaces\/([^/]+)\/purchase-requests\/([^/]+)\/approvals$/,
+    );
+
+    if (requestApprovalMatch && method === 'GET') {
+      const requestId = decodeURIComponent(requestApprovalMatch[2] as string);
+      const items = approvals
+        .filter((approval) => approval.request.id === requestId)
+        .map(cycleSummaryOf);
+
+      return jsonResponse({ data: { items } });
+    }
+
+    const approvalMatch = path.match(
+      /^\/api\/workspaces\/([^/]+)\/approvals(?:\/([^/]+))?(?:\/(approve|reject|request-changes))?$/,
+    );
+
+    if (approvalMatch) {
+      const approvalId = approvalMatch[2] ? decodeURIComponent(approvalMatch[2]) : null;
+      const action = approvalMatch[3] ?? null;
+
+      if (!approvalId && method === 'GET') {
+        const page = Math.max(1, Number(url.searchParams.get('page') ?? 1));
+        const pageSize = Math.max(1, Number(url.searchParams.get('pageSize') ?? 10));
+        const status = url.searchParams.get('status');
+        const priority = url.searchParams.get('priority');
+        const requester = (url.searchParams.get('requester') ?? '').toLowerCase();
+        const search = (url.searchParams.get('search') ?? '').toLowerCase();
+        const minAmount = url.searchParams.get('minAmount');
+        const maxAmount = url.searchParams.get('maxAmount');
+        const from = url.searchParams.get('from');
+        const to = url.searchParams.get('to');
+        const allItems = inboxItemsFor(approvals, session.user.id);
+
+        const filtered = allItems.filter((item) => {
+          if (!status) {
+            if (
+              item.stepStatus !== ApprovalStepStatus.Pending ||
+              !item.isActive ||
+              item.approvalStatus !== ApprovalCycleStatus.Pending
+            ) {
+              return false;
+            }
+          } else if (item.stepStatus !== status) {
+            return false;
+          }
+
+          if (priority && item.priority !== priority) {
+            return false;
+          }
+
+          if (
+            requester &&
+            !`${item.requester.firstName} ${item.requester.lastName} ${item.requester.email}`
+              .toLowerCase()
+              .includes(requester)
+          ) {
+            return false;
+          }
+
+          const haystack =
+            `${item.requestNumber} ${item.title} ${item.department ?? ''} ${item.requester.firstName} ${item.requester.lastName}`.toLowerCase();
+
+          if (search && !haystack.includes(search)) {
+            return false;
+          }
+
+          const amount = Number(item.amount);
+
+          if (minAmount && amount < Number(minAmount)) {
+            return false;
+          }
+
+          if (maxAmount && amount > Number(maxAmount)) {
+            return false;
+          }
+
+          const submittedDate = item.submittedAt.slice(0, 10);
+
+          if (from && submittedDate < from.slice(0, 10)) {
+            return false;
+          }
+
+          if (to && submittedDate > to.slice(0, 10)) {
+            return false;
+          }
+
+          return true;
+        });
+
+        const result: ApprovalInboxResult = {
+          ...paginate(filtered, page, pageSize),
+          summary: inboxSummaryFor(allItems),
+        };
+
+        return jsonResponse({ data: result });
+      }
+
+      const index = approvals.findIndex((approval) => approval.id === approvalId);
+
+      if (index === -1) {
+        return errorResponse(404, 'APPROVAL_NOT_FOUND', 'Approval not found in this workspace.');
+      }
+
+      const approval = approvals[index] as ApprovalDetail;
+
+      if (!action && method === 'GET') {
+        return jsonResponse({ data: approval });
+      }
+
+      if (action && method === 'POST') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as {
+          comment?: string | null;
+          reason?: string;
+          explanation?: string;
+        };
+
+        if (action === 'reject') {
+          const reason = (body.reason ?? '').trim();
+
+          if (!reason) {
+            return errorResponse(
+              422,
+              'VALIDATION_ERROR',
+              'Please correct the highlighted fields.',
+              { fieldErrors: { reason: ['Enter a reason for rejecting this request.'] } },
+            );
+          }
+        }
+
+        if (action === 'request-changes') {
+          const explanation = (body.explanation ?? '').trim();
+
+          if (!explanation) {
+            return errorResponse(
+              422,
+              'VALIDATION_ERROR',
+              'Please correct the highlighted fields.',
+              {
+                fieldErrors: {
+                  explanation: ['Explain the changes the requester needs to make.'],
+                },
+              },
+            );
+          }
+        }
+
+        const kind =
+          action === 'approve'
+            ? ('approve' as const)
+            : action === 'reject'
+              ? ('reject' as const)
+              : ('request-changes' as const);
+        const note =
+          kind === 'approve'
+            ? (body.comment ?? '').trim() || null
+            : kind === 'reject'
+              ? (body.reason ?? '').trim()
+              : (body.explanation ?? '').trim();
+        const updated = applyDecision(approval, kind, note, session.user, permissions);
+
+        if (updated === approval) {
+          return errorResponse(
+            409,
+            'APPROVAL_NOT_PENDING',
+            'This approval cycle is no longer pending.',
+          );
+        }
+
+        approvals[index] = updated;
+        const requestIndex = purchaseRequests.findIndex(
+          (request) => request.id === updated.request.id,
+        );
+
+        if (requestIndex !== -1) {
+          purchaseRequests[requestIndex] = updated.request;
+        }
+
+        return jsonResponse({ data: updated });
+      }
+    }
+
+    const workflowMatch = path.match(
+      /^\/api\/workspaces\/([^/]+)\/approval-workflows(?:\/([^/]+))?(?:\/(activate|deactivate))?$/,
+    );
+
+    if (workflowMatch) {
+      const workflowId = workflowMatch[2] ? decodeURIComponent(workflowMatch[2]) : null;
+      const action = workflowMatch[3] ?? null;
+
+      if (!workflowId && method === 'GET') {
+        const page = Math.max(1, Number(url.searchParams.get('page') ?? 1));
+        const pageSize = Math.max(1, Number(url.searchParams.get('pageSize') ?? 20));
+        const search = (url.searchParams.get('search') ?? '').toLowerCase();
+        const status = url.searchParams.get('status');
+
+        const filtered = workflows.filter((workflow) => {
+          const haystack = `${workflow.name} ${workflow.description ?? ''}`.toLowerCase();
+
+          return (
+            (search === '' || haystack.includes(search)) &&
+            (status !== 'active' || workflow.isActive) &&
+            (status !== 'inactive' || !workflow.isActive) &&
+            (status !== 'default' || workflow.isDefault)
+          );
+        });
+
+        const result: ApprovalWorkflowListResult = {
+          ...paginate(filtered.map(workflowSummary), page, pageSize),
+        };
+
+        return jsonResponse({ data: result });
+      }
+
+      if (!workflowId && method === 'POST') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as ApprovalWorkflowWriteRequest;
+        workflowSequence += 1;
+
+        if (body.isDefault) {
+          for (const workflow of workflows) {
+            workflow.isDefault = false;
+          }
+        }
+
+        const created = workflowFromWrite(
+          `workflow-created-${workflowSequence}`,
+          body,
+          members,
+          session.user,
+          new Date().toISOString(),
+          body.isDefault,
+        );
+        workflows.unshift(created);
+        return jsonResponse({ data: created }, 201);
+      }
+
+      if (workflowId === 'preview' && method === 'POST') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as ApprovalWorkflowWriteRequest;
+        return jsonResponse({ data: previewWorkflow(body, members) });
+      }
+
+      const index = workflows.findIndex((workflow) => workflow.id === workflowId);
+
+      if (index === -1) {
+        return errorResponse(
+          404,
+          'WORKFLOW_NOT_FOUND',
+          'Approval workflow not found in this workspace.',
+        );
+      }
+
+      const workflow = workflows[index] as ApprovalWorkflowDetail;
+
+      if (!action && method === 'GET') {
+        return jsonResponse({ data: workflow });
+      }
+
+      if (!action && method === 'PUT') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as ApprovalWorkflowWriteRequest;
+
+        if (body.isDefault) {
+          workflows.forEach((candidate, candidateIndex) => {
+            if (candidateIndex !== index) {
+              candidate.isDefault = false;
+            }
+          });
+        }
+
+        const updated = workflowFromWrite(
+          workflow.id,
+          body,
+          members,
+          workflow.createdBy,
+          workflow.createdAt,
+          body.isDefault ? true : workflow.isActive,
+        );
+        workflows[index] = updated;
+        return jsonResponse({ data: updated });
+      }
+
+      if (!action && method === 'DELETE') {
+        workflows.splice(index, 1);
+        return {
+          ok: true,
+          status: 204,
+          headers: new Headers(),
+          json: async () => null,
+        };
+      }
+
+      if (action === 'activate' && method === 'POST') {
+        const updated: ApprovalWorkflowDetail = {
+          ...workflow,
+          isActive: true,
+          updatedAt: new Date().toISOString(),
+        };
+        workflows[index] = updated;
+        return jsonResponse({ data: updated });
+      }
+
+      if (action === 'deactivate' && method === 'POST') {
+        const updated: ApprovalWorkflowDetail = {
+          ...workflow,
+          isActive: false,
+          isDefault: false,
+          updatedAt: new Date().toISOString(),
+        };
+        workflows[index] = updated;
+        return jsonResponse({ data: updated });
       }
     }
 

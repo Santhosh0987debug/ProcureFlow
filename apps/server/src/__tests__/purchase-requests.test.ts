@@ -184,6 +184,34 @@ async function seedWorkspace() {
   await addMember(workspace.id, otherRequester, WorkspaceRole.Requester as DbRole);
   await addMember(workspace.id, viewer, WorkspaceRole.Viewer as DbRole);
 
+  const approverMembership = await prisma.workspaceMember.findFirstOrThrow({
+    where: { workspaceId: workspace.id, userId: approver.id },
+  });
+
+  await prisma.approvalWorkflow.create({
+    data: {
+      workspaceId: workspace.id,
+      name: 'Default test workflow',
+      description: 'Single-level workflow used by purchase request lifecycle tests.',
+      isActive: true,
+      isDefault: true,
+      currency: 'USD',
+      createdById: owner.id,
+      levels: {
+        create: [
+          {
+            levelOrder: 1,
+            name: 'Approver review',
+            completionRule: 'all_required',
+            approvers: {
+              create: [{ assignmentType: 'member', memberId: approverMembership.id }],
+            },
+          },
+        ],
+      },
+    },
+  });
+
   return {
     owner,
     workspace,
@@ -593,7 +621,8 @@ describe('purchase request lifecycle', () => {
     expect(audits).toHaveLength(1);
     expect(audits[0]?.metadata).toMatchObject({
       requestNumber: created.requestNumber,
-      status: RequestStatus.PendingApproval,
+      fromStatus: RequestStatus.Draft,
+      toStatus: RequestStatus.Submitted,
       itemCount: 2,
     });
   });

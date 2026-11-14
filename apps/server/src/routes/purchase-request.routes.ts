@@ -8,8 +8,10 @@ import {
   submitWorkspacePurchaseRequest,
   updateWorkspacePurchaseRequest,
 } from '../controllers/purchase-request.controller.js';
+import { getWorkspaceRequestApprovalHistory } from '../controllers/approval.controller.js';
 import { authorizeWorkspace, authorizeWorkspaceAny } from '../middleware/authorize.js';
 import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
+import { requestApprovalHistoryParamsSchema } from '../validators/approval.schemas.js';
 import {
   createPurchaseRequestSchema,
   listPurchaseRequestsQuerySchema,
@@ -41,6 +43,13 @@ purchaseRequestRouter.get(
   validateParams(purchaseRequestParamsSchema),
   authorizeWorkspaceAny([Permission.RequestsRead, Permission.RequestsReadOwn]),
   getWorkspacePurchaseRequest,
+);
+
+purchaseRequestRouter.get(
+  '/:requestId/approvals',
+  validateParams(requestApprovalHistoryParamsSchema),
+  authorizeWorkspaceAny([Permission.RequestsRead, Permission.RequestsReadOwn]),
+  getWorkspaceRequestApprovalHistory,
 );
 
 purchaseRequestRouter.patch(

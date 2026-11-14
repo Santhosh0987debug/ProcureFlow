@@ -158,6 +158,142 @@ async function main(): Promise<void> {
     },
   });
 
+  const seededMembers = await prisma.workspaceMember.findMany({
+    where: { workspaceId: workspace.id },
+    select: { id: true, userId: true },
+  });
+  const memberIdFor = (userId: string): string =>
+    seededMembers.find((member) => member.userId === userId)!.id;
+
+  await prisma.approvalWorkflow.create({
+    data: {
+      workspaceId: workspace.id,
+      name: 'Standard procurement approval',
+      description:
+        'Default route for requests up to $25,000: manager review, finance review, and procurement sign-off.',
+      isActive: true,
+      isDefault: true,
+      currency: 'USD',
+      minAmount: null,
+      maxAmount: decimal('25000.00'),
+      createdById: people.amara.id,
+      levels: {
+        create: [
+          {
+            levelOrder: 1,
+            name: 'Manager review',
+            completionRule: 'all_required',
+            approvers: {
+              create: [{ assignmentType: 'role', role: 'procurement_manager' }],
+            },
+          },
+          {
+            levelOrder: 2,
+            name: 'Finance review',
+            completionRule: 'all_required',
+            approvers: {
+              create: [
+                {
+                  assignmentType: 'member',
+                  memberId: memberIdFor(people.daniel.id),
+                },
+              ],
+            },
+          },
+          {
+            levelOrder: 3,
+            name: 'Procurement sign-off',
+            completionRule: 'all_required',
+            approvers: {
+              create: [
+                {
+                  assignmentType: 'member',
+                  memberId: memberIdFor(people.amara.id),
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  });
+
+  await prisma.approvalWorkflow.create({
+    data: {
+      workspaceId: workspace.id,
+      name: 'Capital expenditure approval',
+      description:
+        'Route for requests above $25,000 with parallel finance or approver review, followed by executive sign-off.',
+      isActive: true,
+      isDefault: false,
+      currency: 'USD',
+      minAmount: decimal('25000.01'),
+      maxAmount: null,
+      createdById: people.amara.id,
+      levels: {
+        create: [
+          {
+            levelOrder: 1,
+            name: 'Finance and approver review',
+            completionRule: 'any_one',
+            approvers: {
+              create: [
+                {
+                  assignmentType: 'member',
+                  memberId: memberIdFor(people.daniel.id),
+                },
+                {
+                  assignmentType: 'member',
+                  memberId: memberIdFor(people.priya.id),
+                },
+              ],
+            },
+          },
+          {
+            levelOrder: 2,
+            name: 'Executive sign-off',
+            completionRule: 'all_required',
+            approvers: {
+              create: [
+                {
+                  assignmentType: 'member',
+                  memberId: memberIdFor(people.amara.id),
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  });
+
+  await prisma.approvalWorkflow.create({
+    data: {
+      workspaceId: workspace.id,
+      name: 'Low-value fast track',
+      description:
+        'Inactive example for requests up to $1,000 that only need a procurement manager review.',
+      isActive: false,
+      isDefault: false,
+      currency: 'USD',
+      minAmount: null,
+      maxAmount: decimal('1000.00'),
+      createdById: people.amara.id,
+      levels: {
+        create: [
+          {
+            levelOrder: 1,
+            name: 'Procurement manager review',
+            completionRule: 'all_required',
+            approvers: {
+              create: [{ assignmentType: 'role', role: 'procurement_manager' }],
+            },
+          },
+        ],
+      },
+    },
+  });
+
   const vendorSeed = [
     {
       name: 'Meridian Office Systems',
@@ -338,28 +474,43 @@ async function main(): Promise<void> {
     data: {
       workspaceId: workspace.id,
       purchaseRequestId: workstationRequest.id,
+      requestedById: people.marcus.id,
+      workflowName: 'Legacy procurement approval',
+      workflowDescription: 'Snapshot retained from before configurable workflows.',
+      cycleNumber: 1,
       status: 'pending',
-      currentStep: 2,
+      currentLevel: 2,
+      levelCount: 3,
       requestedAt: daysAgo(3, 9),
       steps: {
         create: [
           {
+            levelOrder: 1,
             stepOrder: 1,
             name: 'Department head review',
+            levelRule: 'all_required',
+            assignmentType: 'member',
             approverId: people.priya.id,
             status: 'approved',
             decisionNote: 'Headcount and refresh cycle are aligned with the engineering plan.',
             decidedAt: daysAgo(2, 14),
           },
           {
+            levelOrder: 2,
             stepOrder: 2,
             name: 'Finance review',
+            levelRule: 'all_required',
+            assignmentType: 'member',
             approverId: people.daniel.id,
             status: 'pending',
+            isActive: true,
           },
           {
+            levelOrder: 3,
             stepOrder: 3,
             name: 'Procurement sign-off',
+            levelRule: 'all_required',
+            assignmentType: 'member',
             approverId: people.amara.id,
             status: 'pending',
           },
@@ -491,7 +642,7 @@ async function main(): Promise<void> {
       {
         workspaceId: workspace.id,
         actorId: people.priya.id,
-        action: 'approval.step.approved',
+        action: 'approval.approved',
         entityType: 'purchase_request',
         entityId: workstationRequest.id,
         summary: 'Approved the department head review for PR-2026-0142.',
@@ -570,23 +721,34 @@ async function main(): Promise<void> {
     data: {
       workspaceId: workspace.id,
       purchaseRequestId: furnitureRequest.id,
+      requestedById: people.priya.id,
+      workflowName: 'Legacy procurement approval',
+      workflowDescription: 'Snapshot retained from before configurable workflows.',
+      cycleNumber: 1,
       status: 'approved',
-      currentStep: 2,
+      currentLevel: 2,
+      levelCount: 2,
       requestedAt: daysAgo(10, 9),
       completedAt: daysAgo(7, 16),
       steps: {
         create: [
           {
+            levelOrder: 1,
             stepOrder: 1,
             name: 'Workplace lead review',
+            levelRule: 'all_required',
+            assignmentType: 'member',
             approverId: people.amara.id,
             status: 'approved',
             decisionNote: 'Scope matches the approved workplace plan.',
             decidedAt: daysAgo(8, 11),
           },
           {
+            levelOrder: 2,
             stepOrder: 2,
             name: 'Finance review',
+            levelRule: 'all_required',
+            assignmentType: 'member',
             approverId: people.daniel.id,
             status: 'approved',
             decisionNote: 'Within the facilities capital allocation.',
@@ -782,7 +944,7 @@ async function main(): Promise<void> {
       {
         workspaceId: workspace.id,
         actorId: people.daniel.id,
-        action: 'approval.completed',
+        action: 'approval_cycle.completed',
         entityType: 'purchase_request',
         entityId: furnitureRequest.id,
         summary: 'Approved PR-2026-0138 after finance review.',
@@ -855,23 +1017,34 @@ async function main(): Promise<void> {
     data: {
       workspaceId: workspace.id,
       purchaseRequestId: coolingRequest.id,
+      requestedById: people.priya.id,
+      workflowName: 'Legacy procurement approval',
+      workflowDescription: 'Snapshot retained from before configurable workflows.',
+      cycleNumber: 1,
       status: 'approved',
-      currentStep: 2,
+      currentLevel: 2,
+      levelCount: 2,
       requestedAt: daysAgo(8, 9),
       completedAt: daysAgo(5, 15),
       steps: {
         create: [
           {
+            levelOrder: 1,
             stepOrder: 1,
             name: 'Operations review',
+            levelRule: 'all_required',
+            assignmentType: 'member',
             approverId: people.amara.id,
             status: 'approved',
             decisionNote: 'Critical maintenance window is already reserved.',
             decidedAt: daysAgo(6, 10),
           },
           {
+            levelOrder: 2,
             stepOrder: 2,
             name: 'Finance review',
+            levelRule: 'all_required',
+            assignmentType: 'member',
             approverId: people.daniel.id,
             status: 'approved',
             decisionNote: 'Approved within the facilities maintenance budget.',
@@ -1047,23 +1220,34 @@ async function main(): Promise<void> {
     data: {
       workspaceId: workspace.id,
       purchaseRequestId: packagingRequest.id,
+      requestedById: people.marcus.id,
+      workflowName: 'Legacy procurement approval',
+      workflowDescription: 'Snapshot retained from before configurable workflows.',
+      cycleNumber: 1,
       status: 'approved',
-      currentStep: 2,
+      currentLevel: 2,
+      levelCount: 2,
       requestedAt: daysAgo(24, 9),
       completedAt: daysAgo(21, 14),
       steps: {
         create: [
           {
+            levelOrder: 1,
             stepOrder: 1,
             name: 'Operations review',
+            levelRule: 'all_required',
+            assignmentType: 'member',
             approverId: people.amara.id,
             status: 'approved',
             decisionNote: 'Peak volume forecast supports the replenishment.',
             decidedAt: daysAgo(22, 10),
           },
           {
+            levelOrder: 2,
             stepOrder: 2,
             name: 'Finance review',
+            levelRule: 'all_required',
+            assignmentType: 'member',
             approverId: people.daniel.id,
             status: 'approved',
             decisionNote: 'Approved as an operating expense.',
@@ -1248,7 +1432,7 @@ async function main(): Promise<void> {
       {
         workspaceId: workspace.id,
         actorId: people.daniel.id,
-        action: 'approval.completed',
+        action: 'approval_cycle.completed',
         entityType: 'purchase_request',
         entityId: packagingRequest.id,
         summary: 'Approved PR-2026-0129 after finance review.',
@@ -1321,23 +1505,34 @@ async function main(): Promise<void> {
     data: {
       workspaceId: workspace.id,
       purchaseRequestId: trainingRequest.id,
+      requestedById: people.sofia.id,
+      workflowName: 'Legacy procurement approval',
+      workflowDescription: 'Snapshot retained from before configurable workflows.',
+      cycleNumber: 1,
       status: 'rejected',
-      currentStep: 2,
+      currentLevel: 2,
+      levelCount: 2,
       requestedAt: daysAgo(18, 9),
       completedAt: daysAgo(14, 15),
       steps: {
         create: [
           {
+            levelOrder: 1,
             stepOrder: 1,
             name: 'Compliance review',
+            levelRule: 'all_required',
+            assignmentType: 'member',
             approverId: people.amara.id,
             status: 'approved',
             decisionNote: 'The capability gap is valid; commercial review required.',
             decidedAt: daysAgo(16, 11),
           },
           {
+            levelOrder: 2,
             stepOrder: 2,
             name: 'Finance review',
+            levelRule: 'all_required',
+            assignmentType: 'member',
             approverId: people.daniel.id,
             status: 'rejected',
             decisionNote: 'Consolidate with the existing learning contract before renewing.',
@@ -1500,15 +1695,23 @@ async function main(): Promise<void> {
     data: {
       workspaceId: workspace.id,
       purchaseRequestId: telematicsRequest.id,
+      requestedById: people.marcus.id,
+      workflowName: 'Legacy procurement approval',
+      workflowDescription: 'Snapshot retained from before configurable workflows.',
+      cycleNumber: 1,
       status: 'rejected',
-      currentStep: 1,
+      currentLevel: 1,
+      levelCount: 1,
       requestedAt: daysAgo(35, 9),
       completedAt: daysAgo(30, 10),
       steps: {
         create: [
           {
+            levelOrder: 1,
             stepOrder: 1,
             name: 'Fleet review',
+            levelRule: 'all_required',
+            assignmentType: 'member',
             approverId: people.amara.id,
             status: 'rejected',
             decisionNote: 'Request withdrawn; the incumbent contract was extended instead.',

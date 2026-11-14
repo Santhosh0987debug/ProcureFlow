@@ -1,5 +1,10 @@
 import { Prisma } from '@prisma/client';
-import { Permission, RequestStatus, roleHasPermission } from '@procureflow/shared';
+import {
+  ApprovalCycleStatus,
+  Permission,
+  RequestStatus,
+  roleHasPermission,
+} from '@procureflow/shared';
 import type {
   Priority,
   ProcurementCategory,
@@ -17,6 +22,9 @@ import { AuditAction, writeAuditLog } from '../lib/audit.js';
 import type { AuditContext } from '../lib/audit.js';
 import { prisma } from '../lib/prisma.js';
 import { lockWorkspace } from '../lib/workspace-lock.js';
+import { createApprovalCycle } from './approval-cycle.service.js';
+import { loadApprovalCycles } from './approval-queries.js';
+import { lockPurchaseRequest, transitionPurchaseRequest } from './request-state-machine.js';
 import type {
   CreatePurchaseRequestInput,
   ListPurchaseRequestsQueryInput,
@@ -77,10 +85,13 @@ function forbiddenError(): AppError {
 }
 
 function notDraftError(): AppError {
-  return new AppError('Only draft purchase requests can be changed or submitted.', {
-    statusCode: 409,
-    code: 'REQUEST_NOT_DRAFT',
-  });
+  return new AppError(
+    'Only draft or changes-requested purchase requests can be changed or submitted.',
+    {
+      statusCode: 409,
+      code: 'REQUEST_NOT_DRAFT',
+    },
+  );
 }
 
 function alreadySubmittedError(): AppError {
@@ -150,12 +161,20 @@ function actionsFor(
   request: RequestWithRelations,
 ): PurchaseRequestActions {
   const isDraft = request.status === RequestStatus.Draft && request.deletedAt === null;
+  const isChangesRequested =
+    request.status === RequestStatus.ChangesRequested && request.deletedAt === null;
   const inScope = hasWorkspaceRead(actor) || request.requestedById === actor.userId;
 
   return {
-    canEdit: isDraft && inScope && roleHasPermission(actor.role, Permission.RequestsUpdate),
+    canEdit:
+      (isDraft || isChangesRequested) &&
+      inScope &&
+      roleHasPermission(actor.role, Permission.RequestsUpdate),
     canDelete: isDraft && inScope && roleHasPermission(actor.role, Permission.RequestsDelete),
-    canSubmit: isDraft && inScope && roleHasPermission(actor.role, Permission.RequestsSubmit),
+    canSubmit:
+      (isDraft || isChangesRequested) &&
+      inScope &&
+      roleHasPermission(actor.role, Permission.RequestsSubmit),
   };
 }
 
@@ -335,12 +354,12 @@ async function loadRequestForUpdate(
   return request;
 }
 
-function assertDraft(request: RequestWithRelations, operation: 'change' | 'submit'): void {
+function assertEditable(request: RequestWithRelations, operation: 'change' | 'submit'): void {
   if (request.status === RequestStatus.PendingApproval && operation === 'submit') {
     throw alreadySubmittedError();
   }
 
-  if (request.status !== RequestStatus.Draft) {
+  if (request.status !== RequestStatus.Draft && request.status !== RequestStatus.ChangesRequested) {
     throw notDraftError();
   }
 }
@@ -502,6 +521,7 @@ export async function listPurchaseRequests(
     total: statusGroups.reduce((sum, group) => sum + group._count._all, 0),
     draft: countFor(RequestStatus.Draft),
     pendingApproval: countFor(RequestStatus.PendingApproval),
+    changesRequested: countFor(RequestStatus.ChangesRequested),
     approved: countFor(RequestStatus.Approved),
     totalValue: (valueAggregate._sum.totalAmount ?? new Prisma.Decimal(0)).toFixed(2),
   };
@@ -532,7 +552,14 @@ export async function getPurchaseRequestDetail(
 
   assertVisible(actor, request);
 
-  const activity = await loadActivity(workspaceId, request.id);
+  const [activity, approvalHistory] = await Promise.all([
+    loadActivity(workspaceId, request.id),
+    loadApprovalCycles(workspaceId, request.id),
+  ]);
+  const approval =
+    [...approvalHistory].reverse().find((cycle) => cycle.status === ApprovalCycleStatus.Pending) ??
+    approvalHistory[approvalHistory.length - 1] ??
+    null;
 
   return {
     ...toSummary(request),
@@ -542,6 +569,8 @@ export async function getPurchaseRequestDetail(
     items: request.items.map(toItemRecord),
     activity,
     actions: actionsFor(actor, request),
+    approval,
+    approvalHistory,
   };
 }
 
@@ -623,7 +652,7 @@ export async function updatePurchaseRequest(
     const request = await loadRequestForUpdate(transaction, workspaceId, requestId);
 
     assertVisible(actor, request);
-    assertDraft(request, 'change');
+    assertEditable(request, 'change');
 
     const items = buildItems(input.items);
     const totalAmount = totalFor(items);
@@ -700,7 +729,7 @@ export async function deletePurchaseRequest(
     const request = await loadRequestForUpdate(transaction, workspaceId, requestId);
 
     assertVisible(actor, request);
-    assertDraft(request, 'change');
+    assertEditable(request, 'change');
 
     await transaction.purchaseRequest.update({
       where: { id: request.id },
@@ -734,10 +763,18 @@ export async function submitPurchaseRequest(
   assertManagePermission(actor, Permission.RequestsSubmit);
 
   const submittedId = await prisma.$transaction(async (transaction) => {
-    const request = await loadRequestForUpdate(transaction, workspaceId, requestId);
+    const locked = await lockPurchaseRequest(transaction, workspaceId, requestId);
+    const request = await transaction.purchaseRequest.findUnique({
+      where: { id: locked.id },
+      include: requestInclude,
+    });
+
+    if (!request) {
+      throw requestNotFoundError();
+    }
 
     assertVisible(actor, request);
-    assertDraft(request, 'submit');
+    assertEditable(request, 'submit');
 
     const { items, total } = assertSubmittable(request);
 
@@ -756,29 +793,50 @@ export async function submitPurchaseRequest(
       }),
     );
 
+    const resubmission = request.status === RequestStatus.ChangesRequested;
     const submittedAt = new Date();
 
-    await transaction.purchaseRequest.update({
-      where: { id: request.id },
+    const submitted = await transitionPurchaseRequest(transaction, {
+      workspaceId,
+      requestId: request.id,
+      toStatus: RequestStatus.Submitted,
+      expectedStatus: request.status as RequestStatus,
       data: {
-        status: RequestStatus.PendingApproval,
         submittedAt,
+        decidedAt: null,
         totalAmount: total,
+      },
+      auditContext,
+      audit: {
+        action: resubmission
+          ? AuditAction.PurchaseRequestResubmitted
+          : AuditAction.PurchaseRequestSubmitted,
+        summary: resubmission
+          ? `Resubmitted ${request.requestNumber} for approval.`
+          : `Submitted ${request.requestNumber} for approval.`,
+        metadata: {
+          itemCount: items.length,
+          totalAmount: total.toFixed(2),
+        },
       },
     });
 
-    await writeAuditLog(transaction, auditContext, {
+    await createApprovalCycle(transaction, {
       workspaceId,
-      action: AuditAction.PurchaseRequestSubmitted,
-      entityType: 'purchase_request',
-      entityId: request.id,
-      summary: `Submitted ${request.requestNumber} for approval.`,
-      metadata: {
-        requestNumber: request.requestNumber,
-        status: RequestStatus.PendingApproval,
-        itemCount: items.length,
-        totalAmount: total.toFixed(2),
-      },
+      request: submitted,
+      actor,
+      auditContext,
+      auditAction: resubmission
+        ? AuditAction.PurchaseRequestResubmitted
+        : AuditAction.PurchaseRequestSubmitted,
+    });
+
+    await transitionPurchaseRequest(transaction, {
+      workspaceId,
+      requestId: request.id,
+      toStatus: RequestStatus.PendingApproval,
+      expectedStatus: RequestStatus.Submitted,
+      auditContext,
     });
 
     return request.id;

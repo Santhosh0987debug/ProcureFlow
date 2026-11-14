@@ -21,7 +21,9 @@ export enum Priority {
 
 export enum RequestStatus {
   Draft = 'draft',
+  Submitted = 'submitted',
   PendingApproval = 'pending_approval',
+  ChangesRequested = 'changes_requested',
   Approved = 'approved',
   Rejected = 'rejected',
   Cancelled = 'cancelled',

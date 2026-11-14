@@ -2,7 +2,9 @@ import { Currency, Priority, ProcurementCategory, RequestStatus } from '@procure
 
 export const REQUEST_STATUS_LABELS: Record<RequestStatus, string> = {
   [RequestStatus.Draft]: 'Draft',
+  [RequestStatus.Submitted]: 'Submitted',
   [RequestStatus.PendingApproval]: 'Pending approval',
+  [RequestStatus.ChangesRequested]: 'Changes requested',
   [RequestStatus.Approved]: 'Approved',
   [RequestStatus.Rejected]: 'Rejected',
   [RequestStatus.Cancelled]: 'Cancelled',
@@ -63,4 +65,16 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'purchase_request.updated': 'Draft updated',
   'purchase_request.deleted': 'Draft deleted',
   'purchase_request.submitted': 'Submitted for approval',
+  'purchase_request.resubmitted': 'Resubmitted for approval',
+  'approval_cycle.created': 'Approval cycle started',
+  'approval_step.assigned': 'Approval assigned',
+  'approval.approved': 'Approval approved',
+  'approval.rejected': 'Approval rejected',
+  'approval.changes_requested': 'Changes requested',
+  'approval_cycle.completed': 'Approval cycle completed',
+  'approval_workflow.created': 'Workflow created',
+  'approval_workflow.updated': 'Workflow updated',
+  'approval_workflow.activated': 'Workflow activated',
+  'approval_workflow.deactivated': 'Workflow deactivated',
+  'approval_workflow.deleted': 'Workflow deleted',
 };

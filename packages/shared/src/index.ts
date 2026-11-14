@@ -1,4 +1,5 @@
 export * from './api.js';
+export * from './approvals.js';
 export * from './auth.js';
 export * from './members.js';
 export * from './permissions.js';

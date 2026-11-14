@@ -1,15 +1,67 @@
 # ProcureFlow
 
-ProcureFlow is a premium procurement workspace for modern teams. Phase 4 adds complete purchase
-request intake: draft creation with multiple line items, a paginated and filterable request list, a
-detail workspace with activity history, draft editing and soft deletion, and explicit submission for
-approval. All of it builds on the Phase 3 workspace-scoped RBAC and append-only audit trail.
+ProcureFlow is a premium procurement workspace for modern teams. Phase 5 adds configurable approval
+workflows and the full approval experience: sequential levels with parallel approvers, member and
+role assignment, amount-based routing, a centralized purchase-request state machine, an assigned
+approval inbox, transactional approve/reject/request-changes decisions, cycle history, and
+configuration snapshots that protect in-progress approvals. All of it builds on the Phase 4 request
+intake, Phase 3 workspace-scoped RBAC, and the append-only audit trail.
 
-The Phase 1 visual identity and every Phase 2 and Phase 3 authentication, RBAC, and team management
-flow are preserved. Roles always come from the signed-in user's `WorkspaceMember` record, never from
-a global user role.
+The Phase 1 visual identity and every Phase 2, Phase 3, and Phase 4 authentication, RBAC, team
+management, and purchase-request flow are preserved. Roles always come from the signed-in user's
+`WorkspaceMember` record, never from a global user role.
 
-## Phase 4 scope
+## Phase 5 scope
+
+- Approval workflow configuration with a name, description, active/default state, and amount band.
+  Workflows contain ordered levels; each level contains one or more approvers and a completion rule.
+- Approver assignment by workspace member or by eligible role. Role assignments expand to active
+  members at cycle creation; individual assignees must be active members with approval permission.
+- Sequential levels with parallel steps inside each level. A level completes under `all_required`
+  (every approver must approve) or `any_one` (the first approval completes the level); later levels
+  stay inactive until the current level is satisfied.
+- Workflow selection at submission time by currency and amount. An active default wins; otherwise the
+  most specific active amount band wins. Two equally specific non-default matches fail with
+  `409 AMBIGUOUS_APPROVAL_WORKFLOW` instead of choosing silently.
+- Immutable configuration snapshots: the workflow name, description, level order, completion rules,
+  assignment types, and expanded approvers are copied into the approval cycle. Editing or
+  deactivating a workflow never changes an in-progress or completed approval.
+- A centralized purchase-request state machine. Every status change goes through one transition
+  service that locks the request row and validates the current database state; ordinary update
+  endpoints cannot set status directly.
+- Explicit transitions: `draft → submitted`, `submitted → pending_approval`,
+  `pending_approval → approved | rejected | changes_requested`, and
+  `changes_requested → draft | submitted`. Approved, rejected, and cancelled requests are terminal.
+- Assigned approval inbox with pagination and search, plus status, priority, requester, amount, and
+  submission-date filters and workspace decision counters.
+- Approval detail with the full request context and line items, a progress indicator, sequential and
+  parallel visualization, current approvers, and every prior decision and comment.
+- Approve with an optional comment, reject with a mandatory reason, or request changes with a
+  mandatory explanation. Confirmations state the consequence, and required reasons are validated in
+  the browser and again by the API.
+- Rejection ends the active cycle and closes the request. Requesting changes returns control to the
+  requester; resubmission starts a new numbered cycle while all earlier cycles and decisions remain
+  preserved in history.
+- Only the assigned active approver can decide. The API rejects self-approval, duplicate or
+  non-pending decisions, decisions on cancelled/completed/expired cycles, inactive steps, suspended
+  memberships, and cross-workspace identifiers. Frontend role or assignment data is never trusted.
+- Decisions run in a single transaction with row locks on the approval and step records. The pending
+  state is re-verified inside the transaction, the decision and level/cycle advancement commit
+  atomically, concurrent decisions resolve to one winner, and a failed transition rolls back.
+- A partial unique index guarantees at most one pending approval cycle per purchase request, and the
+  cycle service re-checks the same invariant inside its transaction.
+- Append-only audit events for workflow creation, updates, activation, deactivation, and deletion;
+  cycle creation; step assignment; approvals, rejections, and change requests; request resubmission;
+  and cycle completion. Metadata is sanitized and references the workspace, request, cycle, and step.
+- Complete web experience: approval inbox, approval detail with decisions, workflow list, and a
+  workflow editor with level and approver controls, amount conditions, preview-before-activation, and
+  loading, empty, and error states. Purchase-request detail shows approval progress and cycle history.
+- Server and UI tests covering workflow validation and selection, activation and deactivation,
+  sequential and parallel progression, approval and rejection, changes and resubmission, historical
+  cycles, unauthorized and self decisions, duplicates, inactive approvers, cross-workspace access,
+  invalid transitions, concurrent decisions, rollback, and audit creation.
+
+## Phase 4 foundation retained
 
 - Purchase request creation with validated header fields and up to 50 line items. The API calculates
   every line total and the request total with Prisma `Decimal`; client-supplied totals are rejected.
@@ -70,10 +122,9 @@ Phase 2 foundation retained in this phase:
   feedback, and sign-out.
 - A realistic seed workspace covering the request-to-delivery lifecycle.
 
-Not included in Phase 4: approval decisions, approver assignment and routing, vendor management,
-sourcing, purchase-order operations, and delivery receiving. Those remain Phase 5 work; the module
-pages continue to present polished placeholders. Submitted requests are ready for the Phase 5
-approval workflow.
+Not included in Phase 5: vendor management, sourcing, quotation comparison, purchase-order operations,
+and delivery receiving. Those remain Phase 6 work; the module pages continue to present polished
+placeholders. Approved requests are ready for the later sourcing and purchasing phases.
 
 ## Stack
 
@@ -112,26 +163,27 @@ ProcureFlow/
 ├── apps/
 │   ├── server/                 # Express API + Prisma
 │   │   ├── prisma/
-│   │   │   ├── schema.prisma   # Phase 4 data model
+│   │   │   ├── schema.prisma   # Phase 5 data model
 │   │   │   ├── migrations/     # Versioned SQL migrations
 │   │   │   └── seed.ts         # Development dataset
 │   │   ├── prisma.config.ts    # Prisma CLI configuration
 │   │   └── src/
 │   │       ├── config/         # Typed environment configuration
-│   │       ├── controllers/    # HTTP layer, including request/member APIs
+│   │       ├── controllers/    # HTTP layer, including request, approval, and member APIs
 │   │       ├── errors/         # Operational error type
 │   │       ├── lib/            # Prisma, password, JWT, audit, role helpers
 │   │       ├── middleware/     # Auth, workspace authorization, validation
-│   │       ├── routes/         # Auth, workspace, request, invitation, health routers
-│   │       ├── services/       # Request, auth, member, and invitation transactions
+│   │       ├── routes/         # Auth, workspace, request, approval, and health routers
+│   │       ├── services/       # State machine, approval, workflow, request, and member transactions
 │   │       ├── test/           # Test DB setup and factories
-│   │       ├── validators/     # Zod auth, workspace, and request schemas
+│   │       ├── validators/     # Zod auth, workspace, request, and approval schemas
 │   │       ├── app.ts          # Express app factory
 │   │       └── index.ts        # Server bootstrap
 │   └── web/                    # React workspace
 │       └── src/
 │           ├── auth/           # AuthProvider, route guards, permission gate
 │           ├── components/
+│           │   ├── approvals/  # Shared approval progress, levels, and cycle history
 │           │   ├── auth/       # Auth layout, fields, banners
 │           │   ├── dashboard/  # KPIs, analytics, timeline, tables
 │           │   ├── layout/     # Shell, sidebar, header, search
@@ -141,10 +193,10 @@ ProcureFlow/
 │           ├── data/           # Typed demo data, options, permission-aware navigation
 │           ├── hooks/
 │           ├── lib/            # API clients, formatting, error mapping
-│           ├── pages/          # Dashboard, purchase requests, auth, settings, modules
+│           ├── pages/          # Dashboard, requests, approvals, workflows, auth, settings
 │           └── test/
 ├── packages/
-│   └── shared/                 # API, auth, permission, member, procurement contracts
+│   └── shared/                 # API, auth, permission, member, procurement, approval contracts
 ├── .env.example
 ├── eslint.config.js
 ├── tsconfig.base.json
@@ -254,9 +306,21 @@ seeded account uses the development-only password `ProcureFlow!2026`.
 | `sofia.lindberg@northwind.example` | Viewer              |
 
 The seeded workspace contains 7 vendors, 7 purchase requests, 8 quotations, 3 purchase orders,
-4 deliveries, and 20 audit entries. Use these accounts to exercise each role: the owner can manage
-everyone, the admin cannot manage owners or peers, the requester can create requests but cannot
-open approvals, and the viewer has read-only access.
+4 deliveries, 3 approval workflows, 6 approval cycles, and their audit entries. Use these accounts to
+exercise each role: the owner can manage everyone, the admin cannot manage owners or peers, the
+requester can create requests and follow their own approval history but cannot open the approval
+inbox, the approver sees assigned decisions, and the viewer has read-only access.
+
+The seeded approval workflows are:
+
+| Workflow                      | State    | Amount band   | Route                                                             |
+| ----------------------------- | -------- | ------------- | ----------------------------------------------------------------- |
+| Standard procurement approval | Active   | Up to $25,000 | Manager review → finance review → procurement sign-off            |
+| Capital expenditure approval  | Active   | Above $25,000 | Parallel finance/approver review (`any_one`) → executive sign-off |
+| Low-value fast track          | Inactive | Up to $1,000  | Procurement manager review                                        |
+
+The standard workflow is the default. Seeded approval cycles include pending, approved, rejected, and
+changes-requested snapshots so the inbox, detail, and history views are populated immediately.
 
 ### Develop
 
@@ -329,9 +393,9 @@ both the API policy layer and the web interface. A role is always read from the 
 
 | Role                  | Scope                                                                          |
 | --------------------- | ------------------------------------------------------------------------------ |
-| `owner`               | Full workspace control, including ownership and member administration          |
-| `admin`               | Workspace settings and member administration, excluding ownership changes      |
-| `procurement_manager` | Vendors, requests, quotations, purchase orders, deliveries, and reports        |
+| `owner`               | Full workspace control, including ownership, members, and approval workflows   |
+| `admin`               | Workspace settings, members, and approval workflow configuration               |
+| `procurement_manager` | Vendors, requests, approval workflows, quotations, purchase orders, deliveries |
 | `approver`            | Assigned approvals, approval decisions, and read access to procurement records |
 | `requester`           | Creates and manages their own purchase requests                                |
 | `viewer`              | Read-only access to permitted workspace information                            |
@@ -344,6 +408,12 @@ Management rules are conservative:
 - A workspace must always retain at least one active owner. Sensitive membership mutations take a
   PostgreSQL `FOR UPDATE` lock on the workspace row so concurrent owner changes cannot race past the
   last-owner check.
+
+Phase 5 adds two granular permissions to the same registry: `approval_workflows:read` and
+`approval_workflows:manage`. Workflow administration is limited to owners, admins, and procurement
+managers; approvers keep `approvals:read` and `approvals:decide`, requesters can read the approval
+history for their own requests through `requests:read_own`, and viewers remain read-only. No route
+checks a role name directly.
 
 ## Workspace and invitation API
 
@@ -388,14 +458,15 @@ is redacted by key and never contains tokens, hashes, passwords, JWTs, or cookie
 
 ## Purchase request API
 
-| Method   | Endpoint                                                           | Permission                    |
-| -------- | ------------------------------------------------------------------ | ----------------------------- |
-| `GET`    | `/api/workspaces/:workspaceId/purchase-requests`                   | `requests:read` or `read_own` |
-| `POST`   | `/api/workspaces/:workspaceId/purchase-requests`                   | `requests:create`             |
-| `GET`    | `/api/workspaces/:workspaceId/purchase-requests/:requestId`        | `requests:read` or `read_own` |
-| `PATCH`  | `/api/workspaces/:workspaceId/purchase-requests/:requestId`        | `requests:update`             |
-| `DELETE` | `/api/workspaces/:workspaceId/purchase-requests/:requestId`        | `requests:delete`             |
-| `POST`   | `/api/workspaces/:workspaceId/purchase-requests/:requestId/submit` | `requests:submit`             |
+| Method   | Endpoint                                                              | Permission                    |
+| -------- | --------------------------------------------------------------------- | ----------------------------- |
+| `GET`    | `/api/workspaces/:workspaceId/purchase-requests`                      | `requests:read` or `read_own` |
+| `POST`   | `/api/workspaces/:workspaceId/purchase-requests`                      | `requests:create`             |
+| `GET`    | `/api/workspaces/:workspaceId/purchase-requests/:requestId`           | `requests:read` or `read_own` |
+| `GET`    | `/api/workspaces/:workspaceId/purchase-requests/:requestId/approvals` | `requests:read` or `read_own` |
+| `PATCH`  | `/api/workspaces/:workspaceId/purchase-requests/:requestId`           | `requests:update`             |
+| `DELETE` | `/api/workspaces/:workspaceId/purchase-requests/:requestId`           | `requests:delete`             |
+| `POST`   | `/api/workspaces/:workspaceId/purchase-requests/:requestId/submit`    | `requests:submit`             |
 
 Request listing supports `page`, `pageSize`, `search`, `status`, `requesterId`, `category`,
 `priority`, `department`, `from`, and `to`. The response includes the page plus workspace summary
@@ -411,40 +482,112 @@ Request numbers follow `PR-<UTC year>-<sequence>` and are unique within a worksp
 inside a workspace row lock, so concurrent creations receive distinct sequential numbers. Draft
 updates replace all line items atomically; a failed write rolls the whole change back.
 
-Submission is explicit and draft-only. It validates required fields, at least one item, positive
-quantities and prices, and a non-past required-by date; recomputes canonical totals; records
-`submittedAt`; and moves the request to `pending_approval` for Phase 5. Repeat submission returns
-`409 REQUEST_ALREADY_SUBMITTED`, while edits or deletes of a submitted request return
-`409 REQUEST_NOT_DRAFT`. Deletion is a soft delete (`deletedAt`, `deletedById`), after which normal
-reads return `404 REQUEST_NOT_FOUND`.
+Submission is explicit and available for drafts and requests where changes were requested. It
+validates required fields, at least one item, positive quantities and prices, and a non-past
+required-by date; recomputes canonical totals; records `submittedAt`; and moves the request through
+the state machine to `pending_approval`. In the same transaction it selects a matching active
+workflow, snapshots the workflow configuration into a new approval cycle, and assigns approvers.
+Resubmission after changes creates a new numbered cycle and retains every earlier cycle. Repeat
+submission returns `409 REQUEST_ALREADY_SUBMITTED`, while edits or deletes of a request that is not a
+draft or changes-requested return `409 REQUEST_NOT_DRAFT`. Deletion is a soft delete (`deletedAt`,
+`deletedById`), after which normal reads return `404 REQUEST_NOT_FOUND`.
 
 Requesters only see and manage their own records unless they also hold workspace-wide
 `requests:read`. Procurement managers and admins manage workspace requests according to their
 permissions; approvers have read access but cannot submit; viewers remain read-only. Every operation
 is scoped by `workspaceId`, and requests from another workspace return `404` without revealing their
-existence. Creation, updates, deletion, and submission write append-only audit events under the
-`purchase_request.*` actions with actor, workspace, request reference, timestamp, and sanitized
-metadata.
+existence. Creation, updates, deletion, submission, and resubmission write append-only audit events
+under the `purchase_request.*` actions with actor, workspace, request reference, timestamp, and
+sanitized metadata.
+
+## Approval workflow API
+
+| Method   | Endpoint                                                                 | Permission                  |
+| -------- | ------------------------------------------------------------------------ | --------------------------- |
+| `GET`    | `/api/workspaces/:workspaceId/approval-workflows`                        | `approval_workflows:read`   |
+| `POST`   | `/api/workspaces/:workspaceId/approval-workflows`                        | `approval_workflows:manage` |
+| `POST`   | `/api/workspaces/:workspaceId/approval-workflows/preview`                | `approval_workflows:manage` |
+| `GET`    | `/api/workspaces/:workspaceId/approval-workflows/:workflowId`            | `approval_workflows:read`   |
+| `PUT`    | `/api/workspaces/:workspaceId/approval-workflows/:workflowId`            | `approval_workflows:manage` |
+| `DELETE` | `/api/workspaces/:workspaceId/approval-workflows/:workflowId`            | `approval_workflows:manage` |
+| `POST`   | `/api/workspaces/:workspaceId/approval-workflows/:workflowId/activate`   | `approval_workflows:manage` |
+| `POST`   | `/api/workspaces/:workspaceId/approval-workflows/:workflowId/deactivate` | `approval_workflows:manage` |
+
+Workflow listing supports `page`, `pageSize`, `search`, and `status` (`active`, `inactive`, or
+`default`). Write payloads contain the name, description, currency, optional minimum and maximum
+amounts, active/default flags, and an ordered `levels` array. Every level has a name, a
+`completionRule` of `all_required` or `any_one`, and at least one approver. Each approver is either a
+member (`assignmentType: "member"` with `memberId`) or an eligible role (`assignmentType: "role"` with
+`role`).
+
+Validation rejects empty or ambiguous workflows: duplicate level orders or approvers, an approver
+who is not an active member, a role that cannot approve, an inverted amount band, and workflows with
+no levels or no approvers. Only `owner`, `admin`, and `procurement_manager` hold the workflow
+permissions. Setting `isDefault` activates the workflow and clears the previous default; deactivating
+a workflow clears its default flag. A workflow referenced by an approval cannot be deleted.
+
+`POST /preview` resolves the configuration without saving it and returns the ordered levels, the
+expanded approvers for role assignments, and any validation or ambiguity warnings. The web editor
+requires a successful preview of the current form before it enables activation on save.
+
+At submission, workflow selection considers only active workflows in the request currency whose
+amount band contains the request total. The active default wins. Otherwise the most specific matching
+`minAmount` wins; equally specific non-default matches return
+`409 AMBIGUOUS_APPROVAL_WORKFLOW`. No match returns `409 APPROVAL_WORKFLOW_NOT_FOUND`.
+
+## Approval API
+
+| Method | Endpoint                                                              | Permission                     |
+| ------ | --------------------------------------------------------------------- | ------------------------------ |
+| `GET`  | `/api/workspaces/:workspaceId/approvals`                              | `approvals:read`               |
+| `GET`  | `/api/workspaces/:workspaceId/approvals/:approvalId`                  | `approvals:read` or `read_own` |
+| `POST` | `/api/workspaces/:workspaceId/approvals/:approvalId/approve`          | `approvals:decide`             |
+| `POST` | `/api/workspaces/:workspaceId/approvals/:approvalId/reject`           | `approvals:decide`             |
+| `POST` | `/api/workspaces/:workspaceId/approvals/:approvalId/request-changes`  | `approvals:decide`             |
+| `GET`  | `/api/workspaces/:workspaceId/purchase-requests/:requestId/approvals` | `requests:read` or `read_own`  |
+
+The inbox returns only steps assigned to the signed-in user, with pagination and `search`, `status`,
+`priority`, `requester`, `requesterId`, `minAmount`, `maxAmount`, `from`, and `to` filters. Its
+summary counts the signed-in user's pending, approved, rejected, and changes-requested decisions.
+Approval detail includes the request header and line items, the workflow snapshot, every level and
+step, prior decisions and comments, available actions, and the request's complete cycle history.
+
+Decision payloads are strict: approve accepts an optional `comment`, reject requires a `reason`, and
+request-changes requires an `explanation`. The API loads the approval and its steps under
+`FOR UPDATE` locks, verifies inside the transaction that the cycle is pending and the request is
+`pending_approval`, and confirms that the signed-in user owns the active pending step. Decisions on
+non-pending, inactive, cancelled, completed, or expired steps return `409` without writing anything.
+
+Parallel evaluation is explicit. Under `all_required`, every approver in the level must approve
+before the next level activates. Under `any_one`, the first approval completes the level and the
+remaining pending steps are cancelled. Approving the final required level marks the cycle and request
+`approved`. Rejecting ends the active cycle and marks the request `rejected`. Requesting changes ends
+the cycle, marks the request `changes_requested`, and preserves the decision note for the requester.
+Approvals, rejections, change requests, cycle completion, cycle creation, and step assignment write
+append-only audit events with workspace, request, cycle, step, actor, and sanitized metadata.
 
 ## Database model
 
-| Model                 | Purpose                                                                          |
-| --------------------- | -------------------------------------------------------------------------------- |
-| `User`                | Account identity and bcrypt password hash                                        |
-| `Workspace`           | Tenant boundary and base currency                                                |
-| `WorkspaceMember`     | User-to-workspace role and active/suspended status                               |
-| `WorkspaceInvitation` | One-time hashed invitation with expiry and lifecycle status                      |
-| `Vendor`              | Supplier master data scoped to a workspace                                       |
-| `PurchaseRequest`     | Request header with status, priority, category, notes, totals, and soft deletion |
-| `PurchaseRequestItem` | Request line items with quantity, unit, money, category, and notes               |
-| `Approval`            | Workflow container linked one-to-one with a request                              |
-| `ApprovalStep`        | Ordered approver steps with decision notes                                       |
-| `Quotation`           | Vendor quote for a request                                                       |
-| `QuotationItem`       | Quote lines linked to request items                                              |
-| `PurchaseOrder`       | Issued order with vendor, optional quote, and totals                             |
-| `PurchaseOrderItem`   | Order lines with received quantity                                               |
-| `Delivery`            | Shipment against a purchase order                                                |
-| `AuditLog`            | Append-only workspace activity record                                            |
+| Model                      | Purpose                                                                          |
+| -------------------------- | -------------------------------------------------------------------------------- |
+| `User`                     | Account identity and bcrypt password hash                                        |
+| `Workspace`                | Tenant boundary and base currency                                                |
+| `WorkspaceMember`          | User-to-workspace role and active/suspended status                               |
+| `WorkspaceInvitation`      | One-time hashed invitation with expiry and lifecycle status                      |
+| `Vendor`                   | Supplier master data scoped to a workspace                                       |
+| `PurchaseRequest`          | Request header with status, priority, category, notes, totals, and soft deletion |
+| `PurchaseRequestItem`      | Request line items with quantity, unit, money, category, and notes               |
+| `ApprovalWorkflow`         | Reusable approval route with amount conditions, active/default state             |
+| `ApprovalWorkflowLevel`    | Ordered level with a parallel completion rule                                    |
+| `ApprovalWorkflowApprover` | Member or role assignment for a workflow level                                   |
+| `Approval`                 | One approval cycle per submission, with a workflow configuration snapshot        |
+| `ApprovalStep`             | Ordered level/step decision record with assignment, state, and notes             |
+| `Quotation`                | Vendor quote for a request                                                       |
+| `QuotationItem`            | Quote lines linked to request items                                              |
+| `PurchaseOrder`            | Issued order with vendor, optional quote, and totals                             |
+| `PurchaseOrderItem`        | Order lines with received quantity                                               |
+| `Delivery`                 | Shipment against a purchase order                                                |
+| `AuditLog`                 | Append-only workspace activity record                                            |
 
 Money uses `Decimal(14,2)`; quantities use `Decimal(12,2)`. Tables and columns use snake_case
 mappings, and all business records carry `workspaceId` indexes for tenant-scoped queries.
@@ -495,8 +638,20 @@ Coverage includes:
   concurrency, list filters, detail and activity history, draft edits, soft deletion, submission,
   duplicate submission, submitted-request locks, rollback, ownership, role permissions,
   cross-workspace isolation, and audit metadata.
+- Workflow creation and validation, activation/deactivation/default handling, amount-based selection,
+  ambiguity rejection, role expansion, and requester exclusion from approver assignment.
+- State-machine transitions tested independently of HTTP controllers and frontend code, including
+  invalid transitions and database-state re-validation.
+- Sequential approval progression, parallel `all_required` and `any_one` completion, final approval,
+  mandatory rejection and change-request reasons, changes-requested editing, resubmission with
+  historical cycles, and cycle snapshots surviving workflow edits.
+- Unauthorized and cross-workspace decisions, self-approval prevention, duplicate decisions,
+  suspended or inactive approvers, decisions on inactive or completed steps, concurrent decisions,
+  transactional rollback, and approval audit events.
 - Frontend request list, search/filter/pagination, create form with dynamic line items and live
   totals, edit, detail, submit/delete confirmations, viewer read-only mode, and error states.
+- Frontend approval inbox filters and pagination, approval detail decisions with required-reason
+  validation, workflow list/activation, preview-gated workflow creation, and edit snapshot messaging.
 - Frontend role-aware navigation, restricted routes, Settings team management, invitation
   acceptance, suspended access, API errors, and existing authentication flows.
 
@@ -517,17 +672,27 @@ Coverage includes:
   reject client-supplied totals, unknown fields, and imprecise values.
 - Request reads and writes are scoped by workspace and ownership, and request-row locks guard
   edit, delete, and submit races. Request deletion is soft; its audit record remains append-only.
+- Approval decisions require the signed-in user to own the active pending step in the current
+  workspace. Self-approval is prevented by excluding the requester when expanding assignees, and by
+  rejecting any step whose approver matches the requester.
+- Decision transactions lock the approval and step rows, re-verify pending state and request status
+  inside the transaction, and commit the decision with level/cycle advancement atomically. The
+  partial unique index and transactional re-check prevent multiple pending cycles per request.
+- Approval cycles snapshot workflow configuration, so later workflow edits or deactivation cannot
+  change an in-progress or historical approval. Workflow writes validate every member and role
+  assignment before saving.
 - Unexpected errors return a generic `500` envelope without stacks or internal messages.
 - Audit logs have no update or delete API and remain append-only.
 
 ## Phase boundaries
 
-Phase 4 delivers purchase request intake: creation, listing, detail, editing, soft deletion, and
-submission with workspace-scoped authorization and audit logging. Approval decisions, approver
-assignment and routing, vendor management, sourcing, purchase orders, and delivery receiving remain
-Phase 5 work. Submitted requests are ready for the Phase 5 approval workflow; the other module pages
-continue to present polished placeholders so navigation stays complete without pretending those
-workflows are implemented.
+Phase 5 delivers approval workflow configuration and the complete approval decision lifecycle:
+workflow administration, amount-based routing, snapshots, the centralized request state machine,
+the assigned approval inbox, transactional decisions, resubmission with cycle history, and audit
+logging. Vendor management, sourcing, quotation comparison, purchase-order operations, and delivery
+receiving remain Phase 6 work; those module pages continue to present polished placeholders so
+navigation stays complete without pretending those workflows are implemented. Approved requests are
+ready for the later sourcing and purchasing phases.
 
 ## License
 

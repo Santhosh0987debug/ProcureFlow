@@ -1,13 +1,20 @@
 import {
   ApprovalDecision,
+  ApprovalStepStatus,
   DeliveryStatus,
   PurchaseOrderStatus,
   RequestStatus,
 } from '@procureflow/shared';
+import type { ApprovalCycleStatus } from '@procureflow/shared';
 import { cn } from '../../lib/cn';
 
 export type ProcurementStatus =
-  RequestStatus | ApprovalDecision | PurchaseOrderStatus | DeliveryStatus;
+  | RequestStatus
+  | ApprovalDecision
+  | ApprovalCycleStatus
+  | ApprovalStepStatus
+  | PurchaseOrderStatus
+  | DeliveryStatus;
 
 interface StatusDefinition {
   label: string;
@@ -21,9 +28,19 @@ const statusDefinitions: Record<ProcurementStatus, StatusDefinition> = {
     tone: 'bg-[#f2efea] text-[#6f6258]',
     dot: 'bg-taupe',
   },
+  [RequestStatus.Submitted]: {
+    label: 'Submitted',
+    tone: 'bg-[#f1ece6] text-[#6a5b50]',
+    dot: 'bg-espresso/40',
+  },
   [RequestStatus.PendingApproval]: {
     label: 'Pending approval',
     tone: 'bg-[#f4eddf] text-[#6b5430]',
+    dot: 'bg-ochre',
+  },
+  [RequestStatus.ChangesRequested]: {
+    label: 'Changes requested',
+    tone: 'bg-[#f5ebdd] text-[#7a5a35]',
     dot: 'bg-ochre',
   },
   [RequestStatus.Approved]: {
@@ -45,6 +62,11 @@ const statusDefinitions: Record<ProcurementStatus, StatusDefinition> = {
     label: 'Pending',
     tone: 'bg-[#f4eddf] text-[#6b5430]',
     dot: 'bg-ochre',
+  },
+  [ApprovalStepStatus.Skipped]: {
+    label: 'Skipped',
+    tone: 'bg-[#f1eeea] text-[#7a6d62]',
+    dot: 'bg-taupe',
   },
   [PurchaseOrderStatus.Issued]: {
     label: 'Issued',

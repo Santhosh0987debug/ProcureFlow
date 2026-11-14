@@ -1,21 +1,30 @@
-import { RequestStatus } from '@procureflow/shared';
+import { Permission, RequestStatus } from '@procureflow/shared';
 import type { PurchaseRequestActivityEntry, PurchaseRequestDetail } from '@procureflow/shared';
 import {
   ArrowLeft,
+  BadgeCheck,
   CalendarDays,
   FilePenLine,
   FilePlus2,
   FileWarning,
+  GitBranch,
   History,
   Pencil,
   Send,
   Trash2,
+  Undo2,
   UserRound,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import {
+  ApprovalHistory,
+  ApprovalLevels,
+  ApprovalProgress,
+  latestDecisionNote,
+} from '../components/approvals/ApprovalSections';
 import { PriorityBadge } from '../components/requests/PriorityBadge';
 import { RequestErrorPanel, RequestNotice } from '../components/requests/RequestStates';
 import { ButtonLink } from '../components/ui/ButtonLink';
@@ -47,7 +56,7 @@ function isAbortError(error: unknown): boolean {
 }
 
 export default function PurchaseRequestDetailPage() {
-  const { activeWorkspace } = useAuth();
+  const { activeWorkspace, hasPermission } = useAuth();
   const { requestId } = useParams<{ requestId: string }>();
   const workspaceId = activeWorkspace?.id;
   const navigate = useNavigate();
@@ -122,9 +131,14 @@ export default function PurchaseRequestDetailPage() {
 
     try {
       if (confirmAction === 'submit') {
+        const resubmission = request.status === RequestStatus.ChangesRequested;
         const updated = await submitPurchaseRequest(workspaceId, requestId);
         setRequest(updated);
-        setNotice(`${updated.requestNumber} was submitted for approval.`);
+        setNotice(
+          resubmission
+            ? `${updated.requestNumber} was resubmitted for approval in a new cycle.`
+            : `${updated.requestNumber} was submitted for approval.`,
+        );
         closeConfirm();
         return;
       }
@@ -187,6 +201,11 @@ export default function PurchaseRequestDetailPage() {
 
   const requesterName = `${request.requester.firstName} ${request.requester.lastName}`.trim();
   const isDraft = request.status === RequestStatus.Draft;
+  const isChangesRequested = request.status === RequestStatus.ChangesRequested;
+  const canViewApproval = hasPermission(Permission.ApprovalsRead);
+  const approvalLink =
+    request.approval && canViewApproval ? `/approvals/${request.approval.id}` : null;
+  const changesRequestNote = isChangesRequested ? latestDecisionNote(request.approval) : null;
 
   return (
     <div className="space-y-6 lg:space-y-7">
@@ -210,13 +229,18 @@ export default function PurchaseRequestDetailPage() {
         description={request.description}
         actions={
           <>
+            {approvalLink ? (
+              <ButtonLink to={approvalLink} variant="secondary" icon={BadgeCheck}>
+                Open approval
+              </ButtonLink>
+            ) : null}
             {request.actions.canEdit ? (
               <ButtonLink
                 to={`/purchase-requests/${request.id}/edit`}
                 variant="secondary"
                 icon={Pencil}
               >
-                Edit draft
+                {isChangesRequested ? 'Edit request' : 'Edit draft'}
               </ButtonLink>
             ) : null}
             {request.actions.canSubmit ? (
@@ -254,6 +278,25 @@ export default function PurchaseRequestDetailPage() {
           Needed by {request.neededBy ? formatShortDate(request.neededBy) : 'not set'}
         </span>
       </div>
+
+      {isChangesRequested ? (
+        <div
+          role="status"
+          className="flex items-start gap-3 rounded-xl border border-ochre/30 bg-[#f5ebdd] px-4 py-3 text-[11.5px] leading-5 text-[#7a5a35]"
+        >
+          <Undo2 size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <div className="min-w-0">
+            <p className="font-medium">Changes were requested by an approver</p>
+            {changesRequestNote ? (
+              <p className="mt-1 whitespace-pre-line">{changesRequestNote}</p>
+            ) : null}
+            <p className="mt-1">
+              Edit the request and resubmit when the changes are complete. Resubmission starts a new
+              approval cycle and keeps earlier decisions in the approval history.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)] xl:gap-5">
         <div className="space-y-4 xl:space-y-5">
@@ -358,6 +401,52 @@ export default function PurchaseRequestDetailPage() {
             </div>
           </Card>
 
+          {request.approval ? (
+            <>
+              <ApprovalProgress
+                approval={request.approval}
+                action={
+                  approvalLink ? (
+                    <ButtonLink to={approvalLink} variant="secondary" icon={BadgeCheck}>
+                      Open approval
+                    </ButtonLink>
+                  ) : undefined
+                }
+              />
+              <ApprovalLevels approval={request.approval} />
+              {request.approvalHistory.length > 1 ? (
+                <ApprovalHistory
+                  history={request.approvalHistory}
+                  currentCycle={request.approval.cycleNumber}
+                />
+              ) : null}
+            </>
+          ) : request.approvalHistory.length > 0 ? (
+            <ApprovalHistory
+              history={request.approvalHistory}
+              currentCycle={request.approvalHistory[0]?.cycleNumber ?? 0}
+            />
+          ) : (
+            <Card className="overflow-hidden">
+              <div className="flex items-center gap-2 border-b border-beige/70 px-5 py-4 sm:px-6">
+                <GitBranch size={15} strokeWidth={1.8} className="text-taupe" aria-hidden="true" />
+                <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-espresso">
+                  Approval
+                </h2>
+              </div>
+              <EmptyState
+                icon={GitBranch}
+                compact
+                title="Approval has not started"
+                description={
+                  isDraft
+                    ? 'Submitting this draft selects a matching workflow and assigns approvers.'
+                    : 'Approval routing will appear here once the request is submitted.'
+                }
+              />
+            </Card>
+          )}
+
           <Card className="overflow-hidden">
             <div className="flex items-center gap-2 border-b border-beige/70 px-5 py-4 sm:px-6">
               <History size={15} strokeWidth={1.8} className="text-taupe" aria-hidden="true" />
@@ -428,16 +517,9 @@ export default function PurchaseRequestDetailPage() {
                 ) : null}
               </dl>
 
-              {isDraft ? (
-                <p className="rounded-xl border border-beige bg-ivory/60 px-3 py-2.5 text-[10px] leading-4 text-stone">
-                  This request is still a draft. Only drafts can be edited, deleted or submitted.
-                </p>
-              ) : (
-                <p className="rounded-xl border border-beige bg-ivory/60 px-3 py-2.5 text-[10px] leading-4 text-stone">
-                  This request has been submitted and is now locked for approval. Editing and
-                  deletion are no longer available.
-                </p>
-              )}
+              <p className="rounded-xl border border-beige bg-ivory/60 px-3 py-2.5 text-[10px] leading-4 text-stone">
+                {statusGuidance(request.status)}
+              </p>
             </div>
           </Card>
 
@@ -460,15 +542,25 @@ export default function PurchaseRequestDetailPage() {
         open={confirmAction !== null}
         title={
           confirmAction === 'submit'
-            ? `Submit ${request.requestNumber} for approval?`
+            ? isChangesRequested
+              ? `Resubmit ${request.requestNumber} for approval?`
+              : `Submit ${request.requestNumber} for approval?`
             : `Delete ${request.requestNumber}?`
         }
         description={
           confirmAction === 'submit'
-            ? 'The draft will be locked and routed for approval. It cannot be edited, deleted or submitted again afterwards.'
+            ? isChangesRequested
+              ? 'Your updates will start a new approval cycle. Earlier decisions remain in the approval history, and the request is locked while the new cycle is reviewed.'
+              : 'The draft will be locked and routed for approval. It cannot be edited, deleted or submitted again afterwards.'
             : 'This removes the draft from the workspace. The append-only audit trail keeps a record of the deletion.'
         }
-        confirmLabel={confirmAction === 'submit' ? 'Submit request' : 'Delete draft'}
+        confirmLabel={
+          confirmAction === 'submit'
+            ? isChangesRequested
+              ? 'Resubmit request'
+              : 'Submit request'
+            : 'Delete draft'
+        }
         tone={confirmAction === 'submit' ? 'primary' : 'danger'}
         busy={actionBusy}
         error={actionError}
@@ -477,6 +569,27 @@ export default function PurchaseRequestDetailPage() {
       />
     </div>
   );
+}
+
+function statusGuidance(status: RequestStatus): string {
+  switch (status) {
+    case RequestStatus.Draft:
+      return 'This request is still a draft. Only drafts can be edited, deleted or submitted.';
+    case RequestStatus.Submitted:
+      return 'This request has been submitted and is being routed to approvers.';
+    case RequestStatus.PendingApproval:
+      return 'This request is locked while it moves through approval. Editing and deletion are not available.';
+    case RequestStatus.ChangesRequested:
+      return 'An approver requested changes. Edit the request and resubmit to start a new approval cycle.';
+    case RequestStatus.Approved:
+      return 'This request was approved. Editing and deletion are no longer available.';
+    case RequestStatus.Rejected:
+      return 'This request was rejected. The approval cycle is closed and the request cannot be edited or resubmitted.';
+    case RequestStatus.Cancelled:
+      return 'This request was cancelled and can no longer be edited.';
+    default:
+      return 'This request is no longer editable.';
+  }
 }
 
 function SummaryRow({ label, value }: { label: string; value: string }) {

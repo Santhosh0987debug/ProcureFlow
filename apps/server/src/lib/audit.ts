@@ -16,6 +16,18 @@ export const AuditAction = {
   PurchaseRequestUpdated: 'purchase_request.updated',
   PurchaseRequestDeleted: 'purchase_request.deleted',
   PurchaseRequestSubmitted: 'purchase_request.submitted',
+  PurchaseRequestResubmitted: 'purchase_request.resubmitted',
+  ApprovalWorkflowCreated: 'approval_workflow.created',
+  ApprovalWorkflowUpdated: 'approval_workflow.updated',
+  ApprovalWorkflowActivated: 'approval_workflow.activated',
+  ApprovalWorkflowDeactivated: 'approval_workflow.deactivated',
+  ApprovalWorkflowDeleted: 'approval_workflow.deleted',
+  ApprovalCycleCreated: 'approval_cycle.created',
+  ApprovalStepAssigned: 'approval_step.assigned',
+  ApprovalApproved: 'approval.approved',
+  ApprovalRejected: 'approval.rejected',
+  ApprovalChangesRequested: 'approval.changes_requested',
+  ApprovalCycleCompleted: 'approval_cycle.completed',
 } as const;
 
 const SENSITIVE_KEY_PATTERN = /token|password|secret|hash|jwt|cookie|authorization/i;
